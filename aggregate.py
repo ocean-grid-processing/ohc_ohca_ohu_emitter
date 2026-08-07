@@ -1,14 +1,16 @@
 """Read ohc_derive OHCA/OHU outputs and combine mapped layers into combined-layer series.
 
 Input is one `ohc_derive` NetCDF per mapped layer, built with
-`--transforms integral_anom,integral_tendency,area` (add
-`--keep-members integral_anom,integral_tendency` for error bars). Each provides:
+`--transforms integral,integral_anom,integral_tendency,area` (add
+`--keep-members integral,integral_tendency` for error bars). Each provides:
 
-    ohc_integral_anom      (time,)  OHCA, TJ  (integral minus its all-time mean)
-    ohc_integral_tendency  (time,)  OHU,  TJ  (month-to-month change, NaN at t0)
+    ohc_integral_anom      (time,)  OHCA value, TJ  (integral minus its all-time mean)
+    ohc_integral_tendency  (time,)  OHU value,  TJ  (month-to-month change, NaN at t0)
     area_total             ()       m^2
 
-and, with the ensemble, the `_ens` (member, time) siblings.
+For error bars, the `_ens` (member, time) siblings: `ohc_integral_ens` (the ABSOLUTE integral, for
+the OHCA spread — see read_layer) and `ohc_integral_tendency_ens` (for OHU). Note the OHCA spread
+comes from `ohc_integral_ens`, not `ohc_integral_anom_ens`.
 
 Combination is the *same* shallowest-first n_fac weighting as the GCOS emitter. It's linear, so it
 applies identically to OHCA and OHU:  total_L(t) = sum_i n_fac_i * q_i(t). Because OHCA is already
@@ -82,25 +84,29 @@ def read_layer(nc):
     for v in ("ohc_integral_anom", "ohc_integral_tendency", "area_total"):
         if v not in ds.data_vars:
             raise SystemExit("%s missing %s — build it with `derive.py ... "
-                             "--transforms integral_anom,integral_tendency,area`" % (nc, v))
+                             "--transforms integral,integral_anom,integral_tendency,area`" % (nc, v))
     tag = a.get("mapped_layer") or a.get("layer_m")
     if not tag or "_" not in str(tag):
         raise SystemExit("%s has no usable mapped_layer/layer_m attr (got %r)" % (nc, tag))
     top, bottom = (int(x) for x in str(tag).split("_"))
 
-    ohca_da = ds["ohc_integral_anom"].astype("float64")
+    ohca_da = ds["ohc_integral_anom"].astype("float64")      # reported value = mean-field anomaly
     ohu_da = ds["ohc_integral_tendency"].astype("float64")
 
+    # OHCA spread comes from the ABSOLUTE integral members (ohc_integral_ens), matching the original's
+    # data_yearly_std (std of the raw yearly integral). The anomaly members can't be used:
+    # integral_anom demeans each member by its own time-mean, removing the between-member level spread.
     ohca_sd_yearly = ohu_sd_yearly = None
-    has_ens = ("ohc_integral_anom_ens" in ds.data_vars
+    has_ens = ("ohc_integral_ens" in ds.data_vars
                and "ohc_integral_tendency_ens" in ds.data_vars)
-    ohca_ens = ds["ohc_integral_anom_ens"].astype("float64") if has_ens else None
+    ohca_ens = ds["ohc_integral_ens"].astype("float64") if has_ens else None
     ohu_ens = ds["ohc_integral_tendency_ens"].astype("float64") if has_ens else None
     if has_ens:
         ohca_sd_yearly = _yearly_member_std(ohca_ens)
         ohu_sd_yearly = _yearly_member_std(ohu_ens, skipna=False)     # first year (t0 NaN) -> fill
 
-    # OLS linear trend of the annual series (per year-step, integral units); ohu drops its NaN t0 year
+    # OLS trend: central slope from the reported value (anomaly); its spread from the absolute members
+    # (a slope is offset-invariant, so the two are consistent). ohu drops its NaN t0 year.
     ohca_trend, ohca_trend_uq = _layer_trend(ohca_da, ohca_ens, skipna=True)
     ohu_trend, ohu_trend_uq = _layer_trend(ohu_da, ohu_ens, skipna=False)
 

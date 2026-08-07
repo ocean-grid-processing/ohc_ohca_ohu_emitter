@@ -76,10 +76,10 @@ def build_level_dataset(cl, tag, collaborators):
     }
     if cl["ohca_sd_yearly"] is not None:
         note = "worst-case ensemble 1-sigma: linear n_fac-weighted sum of per-layer yearly SDs"
-        dv["ohca_sd"] = xr.DataArray(to_jm2(cl["ohca_sd_yearly"].sel(year=years).values),
-                                     dims=("time_ohca",), attrs={"units": "J/m2", "comment": note})
-        dv["ohu_sd"] = xr.DataArray(to_wm2(cl["ohu_sd_yearly"].sel(year=years).values),
-                                    dims=("time_ohca",), attrs={"units": "W/m2", "comment": note})
+        dv["ohca_std"] = xr.DataArray(to_jm2(cl["ohca_sd_yearly"].sel(year=years).values),
+                                      dims=("time_ohca",), attrs={"units": "J/m2", "comment": note})
+        dv["ohu_std"] = xr.DataArray(to_wm2(cl["ohu_sd_yearly"].sel(year=years).values),
+                                     dims=("time_ohca",), attrs={"units": "W/m2", "comment": note})
 
     # Linear trends as attrs: OLS slope of the annual series expressed per second. to_jm2/to_wm2 carry
     # the same per-area (and per-month) conversion as the values; / SEC_PER_YEAR is the year-step ->
@@ -87,8 +87,8 @@ def build_level_dataset(cl, tag, collaborators):
     dv["ohca"].attrs.update({"trend": to_jm2(cl["ohca_trend"]) / SEC_PER_YEAR, "trend_units": "W/m2"})
     dv["ohu"].attrs.update({"trend": to_wm2(cl["ohu_trend"]) / SEC_PER_YEAR, "trend_units": "W/m2/s"})
     if cl["ohca_trend_uq"] is not None:
-        dv["ohca"].attrs["trend_uq"] = to_jm2(cl["ohca_trend_uq"]) / SEC_PER_YEAR
-        dv["ohu"].attrs["trend_uq"] = to_wm2(cl["ohu_trend_uq"]) / SEC_PER_YEAR
+        dv["ohca"].attrs["trend_std"] = to_jm2(cl["ohca_trend_uq"]) / SEC_PER_YEAR
+        dv["ohu"].attrs["trend_std"] = to_wm2(cl["ohu_trend_uq"]) / SEC_PER_YEAR
 
     out = xr.Dataset(dv, coords={"time_ohca": time})
     out.attrs["level"] = cl["name"]

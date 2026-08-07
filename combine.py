@@ -5,8 +5,8 @@
         [--levels 0_300,0_700,700_2000,0_2000] [--collaborators STR] [--out DIR]
 
 Each DERIVE_*.nc is one mapped layer's ohc_derive output, built with
-`derive.py ... --transforms integral_anom,integral_tendency,area`
-(add `--keep-members integral_anom,integral_tendency` for error bars). The combined layers and
+`derive.py ... --transforms integral,integral_anom,integral_tendency,area`
+(add `--keep-members integral,integral_tendency` for error bars). The combined layers and
 their n_fac/dz weights live in layers.py (same table as the GCOS emitter). One .nc is written per
 combined level. No baseline windowing — OHCA is already anomaly-referenced upstream.
 
