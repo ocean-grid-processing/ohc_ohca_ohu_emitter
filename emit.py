@@ -6,17 +6,18 @@ No baseline windowing. OHCA arrives already referenced to its whole-record mean 
 drops out of the first year's mean by skipna). Each value gets a `*_sd` companion when the derive
 inputs carried the ensemble.
 
-Open reproduction details to reconcile against the Zenodo 14720478 target (deliberately not pinned
-in this backbone): the reported units (TJ vs J/m^2 vs ZJ for OHCA; per-month vs per-second W/m^2 for
-OHU), the exact variable names, and whether the anomaly baseline is the monthly all-time mean (as
-`integral_anom` gives) or a mean of the annual series. The combine/annualize machinery below is
-agnostic to those; they are output-formatting choices layered on top.
+Output is per-area densities to match the target (Zenodo 14720478 v4.0.0): `ohca` J/m², `ohu` W/m².
+The combine works in basin-integrated TJ, so the export divides by the reference area (and scales
+TJ->J, and OHU / seconds-per-month). Still to reconcile against the target: the exact variable names
+/ file layout, the OHU seconds-per-month convention, and the t0 / partial-year handling for OHU.
 """
 import numpy as np
 import pandas as pd
 import xarray as xr
 
 EPOCH = "2004-06-01"     # time_ohca reference; each year anchored at its 1-June
+TERA = 1e12              # TJ -> J
+SEC_PER_MONTH = 365.25 / 12.0 * 86400.0   # idealized month, matching derive's trend axis
 
 
 def _yearly(series):
@@ -33,39 +34,47 @@ def _time_ohca(years):
                                "calendar": "proleptic_gregorian", "long_name": "time"})
 
 
-def build_level_dataset(cl, tag, collaborators, baseline):
-    """One combined level's result -> an xr.Dataset over `time_ohca` with ohca, ohu (+ optional `_sd`)."""
+def build_level_dataset(cl, tag, collaborators):
+    """One combined level's result -> an xr.Dataset over `time_ohca` with ohca, ohu (+ optional `_sd`).
+
+    Emits per-area densities to match the target (Zenodo 14720478 v4.0.0): `ohca` in J/m², `ohu` in
+    W/m². The combine gives basin-integrated TJ / TJ-per-month, so each is divided by the reference
+    area and scaled TJ->J (`× TERA`); `ohu` additionally / seconds-per-month (idealized month, same
+    convention as derive's trend). No baseline window — `ohca` is the whole-record anomaly from
+    derive's `integral_anom`. SDs carry the same per-area/units conversion as their values.
+
+    (The OHU seconds/month factor is a convention: idealized `365.25/12` vs each month's actual
+    length. Confirm against the target's own numbers if OHU is slightly off.)
+    """
+    area = cl["area"]
     ohca_yr = _yearly(cl["ohca"])
     ohu_yr = _yearly(cl["ohu"])
     years = ohca_yr["year"].values.astype("int64")
 
-    # GCOS-style baseline: subtract the window mean of the annual OHCA. OHCA already had its
-    # whole-record mean removed upstream (integral_anom), so that all-time mean cancels here — this
-    # is exactly windowing the raw integral, matching the GCOS emitter. (A guess: the target's much
-    # smaller magnitude suggests it referenced to a window; no source to confirm.) The SD is NOT
-    # baseline-subtracted — a constant offset leaves the member spread unchanged — matching GCOS.
-    b0, b1 = baseline
-    ohca_yr = ohca_yr - ohca_yr.sel(year=slice(b0, b1)).mean("year")
+    def to_jm2(tj):                       # TJ -> J/m^2
+        return tj / area * TERA
+
+    def to_wm2(tj_per_month):             # TJ/month -> W/m^2
+        return tj_per_month / area * TERA / SEC_PER_MONTH
 
     time = _time_ohca(years)
     dv = {
-        "ohca": xr.DataArray(ohca_yr.values, dims=("time_ohca",),
-                             attrs={"units": "TJ", "area_m2": cl["area"],
-                                    "long_name": "annual OHC anomaly (%d-%d baseline)" % (b0, b1)}),
-        "ohu": xr.DataArray(ohu_yr.values, dims=("time_ohca",),
-                            attrs={"units": "TJ per month", "area_m2": cl["area"],
+        "ohca": xr.DataArray(to_jm2(ohca_yr.values), dims=("time_ohca",),
+                             attrs={"units": "J/m2", "area_m2": area,
+                                    "long_name": "annual OHC anomaly (all-time mean removed)"}),
+        "ohu": xr.DataArray(to_wm2(ohu_yr.values), dims=("time_ohca",),
+                            attrs={"units": "W/m2", "area_m2": area,
                                    "long_name": "annual mean ocean heat uptake"}),
     }
     if cl["ohca_sd_yearly"] is not None:
         note = "worst-case ensemble 1-sigma: linear n_fac-weighted sum of per-layer yearly SDs"
-        dv["ohca_sd"] = xr.DataArray(cl["ohca_sd_yearly"].sel(year=years).values, dims=("time_ohca",),
-                                     attrs={"units": "TJ", "comment": note})
-        dv["ohu_sd"] = xr.DataArray(cl["ohu_sd_yearly"].sel(year=years).values, dims=("time_ohca",),
-                                    attrs={"units": "TJ per month", "comment": note})
+        dv["ohca_sd"] = xr.DataArray(to_jm2(cl["ohca_sd_yearly"].sel(year=years).values),
+                                     dims=("time_ohca",), attrs={"units": "J/m2", "comment": note})
+        dv["ohu_sd"] = xr.DataArray(to_wm2(cl["ohu_sd_yearly"].sel(year=years).values),
+                                    dims=("time_ohca",), attrs={"units": "W/m2", "comment": note})
 
     out = xr.Dataset(dv, coords={"time_ohca": time})
     out.attrs["level"] = cl["name"]
-    out.attrs["baseline_years"] = "%d-%d" % (b0, b1)
     out.attrs["description"] = "%s, %s" % (tag, collaborators)
     return out
 
