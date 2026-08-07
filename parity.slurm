@@ -20,5 +20,10 @@ python parity.py \
     results/ohca_ohu_0_2000_dbar_validation.nc \
     results/ohca_ohu_0_2000_dbar_LocalGP_Giglio_etal2025.nc
 
+python parity.py \
+    results/ohca_ohu_0_700_dbar_validation.nc \
+    results/ohca_ohu_0_700_dbar_LocalGP_Giglio_etal2025.nc
 
-
+python parity.py \
+    results/ohca_ohu_700_2000_dbar_validation.nc \
+    results/ohca_ohu_700_2000_dbar_LocalGP_Giglio_etal2025.nc
