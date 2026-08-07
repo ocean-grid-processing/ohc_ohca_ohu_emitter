@@ -44,6 +44,12 @@ integral_anom,integral_tendency`), each value gets a `*_sd`: per layer, the ense
 `n_fac` weights as a worst-case linear sum. All-or-nothing — a missing contributor ensemble errors
 loudly rather than dropping a term.
 
+**Trend.** Each `ohca`/`ohu` variable carries a `trend` attribute — an OLS linear slope of the
+annual series (central from the mean field), per second: `trend` on `ohca` is W/m², on `ohu` is
+W/m²/s (mirroring the original's per-second-up trend units). With the ensemble, a `trend_uq` attr
+is the std across members of the per-member slopes, combined by the same linear `n_fac` weights.
+Matches the original (`WMO2024_lsf_trend` yearly OLS, 365-day year; `create_eval_string_trend[_uq]`).
+
 ## Combined layers (config)
 
 The combined-layer table lives in [`layers.py`](layers.py) — a **verbatim duplicate** of the GCOS
@@ -83,6 +89,11 @@ python combine.py DERIVE_*.nc --tag "OHCA-OHU 2026 <run>" [--levels ...] [--out 
   fully correlated — matching the GCOS convention. All-or-nothing.
 - **Reference area = shallowest contributor**, same `reference=shallowest` policy as GCOS; the
   bottom-must-be-wet alternative needs gridded masks and is a deliberate `NotImplementedError`.
+- **Trends are attributes**, not variables — an OLS slope + `trend_uq` per `ohca`/`ohu`, mirroring
+  the target where the trend is a per-variable attr. Fit convention matches the original (yearly OLS,
+  365-day year, member-slope spread).
+- **Fill value `-999`** (the target's), applied on write to every data variable — so `ohu`'s NaN
+  first year (no prior month) lands as `-999`.
 
 ## Open (reproduction-time) details
 

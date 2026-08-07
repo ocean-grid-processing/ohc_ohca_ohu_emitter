@@ -55,7 +55,8 @@ def main():
         cl = aggregate.combine_level(lv, by_tag, reference=args.reference)
         ds = emit.build_level_dataset(cl, args.tag, args.collaborators)
         path = os.path.join(args.out, emit.filename(cl, args.tag))
-        ds.to_netcdf(path, engine="netcdf4")
+        enc = {v: {"_FillValue": -999.0} for v in ds.data_vars}   # target's fill value (NaN -> -999)
+        ds.to_netcdf(path, engine="netcdf4", encoding=enc)
         written.append(path)
 
     print("wrote %d file(s):" % len(written))

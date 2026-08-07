@@ -20,11 +20,14 @@ def _year_da(d):
 
 
 def make_layer(tag, top, bottom, area, ohca, ohu,
-               ohca_sd_yearly=None, ohu_sd_yearly=None, cp0=3989.244, rho0=1030.0):
+               ohca_sd_yearly=None, ohu_sd_yearly=None,
+               ohca_trend=0.0, ohu_trend=0.0, ohca_trend_uq=None, ohu_trend_uq=None,
+               cp0=3989.244, rho0=1030.0):
     """A read_layer()-shaped dict for combine tests (no file IO).
 
     `ohca`/`ohu` are monthly value lists; `*_sd_yearly`, if given, are {year: sd} dicts →
-    the layer's yearly ensemble SD (year,) [TJ].
+    the layer's yearly ensemble SD (year,) [TJ]. `*_trend` / `*_trend_uq` are scalar per-layer
+    slopes (integral units, per year-step); trend_uq is None without an ensemble.
     """
     t = months(len(ohca))
 
@@ -40,4 +43,6 @@ def make_layer(tag, top, bottom, area, ohca, ohu,
         "cp0": cp0, "rho0": rho0, "period": "2004_2004",
         "ohca_sd_yearly": None if ohca_sd_yearly is None else _year_da(ohca_sd_yearly),
         "ohu_sd_yearly": None if ohu_sd_yearly is None else _year_da(ohu_sd_yearly),
+        "ohca_trend": ohca_trend, "ohu_trend": ohu_trend,
+        "ohca_trend_uq": ohca_trend_uq, "ohu_trend_uq": ohu_trend_uq,
     }

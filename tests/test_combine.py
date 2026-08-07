@@ -54,6 +54,40 @@ def test_uncertainty_available_raises_on_partial():
         aggregate.uncertainty_available(["15_20", "15_300"], by)
 
 
+def test_ols_slope_recovers_line():
+    import numpy as np
+    y = 3.0 + 2.5 * np.arange(5)                      # slope 2.5 per step
+    assert abs(aggregate._ols_slope(y) - 2.5) < 1e-12
+    y2 = np.array([np.nan, 10.0, 12.0, 14.0])         # NaN dropped, re-indexed -> slope 2.0
+    assert abs(aggregate._ols_slope(y2) - 2.0) < 1e-12
+
+
+def test_combine_trend_and_uq_linear():
+    by = {
+        "15_20": make_layer("15_20", 15, 20, area=100.0, ohca=[1.0], ohu=[1.0],
+                            ohca_trend=2.0, ohu_trend=0.4, ohca_trend_uq=0.5, ohu_trend_uq=0.05),
+        "15_300": make_layer("15_300", 15, 300, area=80.0, ohca=[1.0], ohu=[1.0],
+                             ohca_trend=7.0, ohu_trend=1.0, ohca_trend_uq=2.0, ohu_trend_uq=0.2),
+    }
+    out = aggregate.combine_level(L0_300, by)
+    assert np.isclose(out["ohca_trend"], 3 * 2.0 + 7.0)          # 13
+    assert np.isclose(out["ohu_trend"], 3 * 0.4 + 1.0)           # 2.2
+    assert np.isclose(out["ohca_trend_uq"], 3 * 0.5 + 2.0)       # 3.5 (worst-case linear sum)
+    assert np.isclose(out["ohu_trend_uq"], 3 * 0.05 + 0.2)       # 0.35
+
+
+def test_combine_trend_uq_all_or_nothing():
+    by = {
+        "15_20": make_layer("15_20", 15, 20, area=100.0, ohca=[1.0], ohu=[1.0],
+                            ohca_trend=2.0, ohu_trend=0.4, ohca_trend_uq=0.5, ohu_trend_uq=0.05),
+        "15_300": make_layer("15_300", 15, 300, area=80.0, ohca=[1.0], ohu=[1.0],
+                             ohca_trend=7.0, ohu_trend=1.0),      # no ensemble -> no trend_uq
+    }
+    out = aggregate.combine_level(L0_300, by)
+    assert np.isclose(out["ohca_trend"], 13.0)                   # central trend still combines
+    assert out["ohca_trend_uq"] is None and out["ohu_trend_uq"] is None
+
+
 def test_dz_mismatch_raises():
     by = {
         "15_20": make_layer("15_20", 15, 25, area=100.0, ohca=[1.0], ohu=[1.0]),  # bounds dz=10, cfg=5
