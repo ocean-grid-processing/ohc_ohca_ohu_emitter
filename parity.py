@@ -36,10 +36,18 @@ def maxdiff(a, b):
     return ad, ad / denom
 
 
-def parse_trend(s):
-    """Target trend attr '1.1606 plus/minus 0.022107' -> (value, uncertainty) floats."""
-    parts = re.split(r"\s*plus/minus\s*", str(s))
-    return float(parts[0]), float(parts[1])
+def read_trend(attrs):
+    """(value, uncertainty) from either trend format, so arg order / which side is which don't matter:
+      * our numeric `trend` (+ `trend_std`), or
+      * the target's `'<value> plus/minus <unc>'` string.
+    Returns None if there's no `trend` attr."""
+    tr = attrs.get("trend")
+    if tr is None:
+        return None
+    if isinstance(tr, str):
+        v, u = re.split(r"\s*plus/minus\s*", tr)
+        return float(v), float(u)
+    return float(tr), float(attrs.get("trend_std", float("nan")))
 
 
 def main():
@@ -80,11 +88,12 @@ def main():
             ra = abs(float(oav) - float(tav)) / (abs(float(tav)) or 1.0)
             print("  %-4s area: ours=%.6g theirs=%.6g (rel %.2e)" % (v, float(oav), float(tav), ra))
 
-    # trend + spread — target string vs our numeric; ~5-fig, so reported not gated
+    # trend + spread — either side may be numeric (ours) or a string (target); ~5-fig, reported not gated
     for v in ("ohca", "ohu"):
-        if "trend" in o[v].attrs and "trend" in t[v].attrs:
-            ov, ou = float(o[v].attrs["trend"]), float(o[v].attrs.get("trend_std", float("nan")))
-            tv, tu = parse_trend(t[v].attrs["trend"])
+        ot, tt = read_trend(o[v].attrs), read_trend(t[v].attrs)
+        if ot is not None and tt is not None:
+            ov, ou = ot
+            tv, tu = tt
             rv = abs(ov - tv) / (abs(tv) or 1.0)
             ru = abs(ou - tu) / (abs(tu) or 1.0)
             print("  %-4s trend: ours=%.5g theirs=%.5g (rel %.2e); spread ours=%.5g theirs=%.5g (rel %.2e)"
