@@ -20,12 +20,20 @@ import aggregate
 import emit
 
 
+def parse_window(s):
+    a, b = (int(x) for x in s.replace("-", ":").split(":"))
+    return (a, b)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("derive", nargs="+", help="ohc_derive .nc files, one per mapped layer")
     ap.add_argument("--tag", required=True, help='run tag, e.g. "OHCA-OHU 2026 OP20260127b"')
     ap.add_argument("--levels", default=None,
                     help="comma list of combined levels to emit (default: all in layers.py)")
+    ap.add_argument("--ref-window", default="2005:2024",
+                    help="baseline-mean window YEAR0:YEAR1 subtracted from the annual OHCA (guessed "
+                         "to match GCOS; the SD is left un-baselined)")
     ap.add_argument("--collaborators", default="LocalGP by Giglio, Sukianto, Kuusela, Mills")
     ap.add_argument("--reference", default="shallowest",
                     help="combined-layer reference area (only 'shallowest' implemented)")
@@ -34,6 +42,7 @@ def main():
 
     names = None if not args.levels else [s.strip() for s in args.levels.split(",")]
     levels = layers_mod.select_levels(names)
+    baseline = parse_window(args.ref_window)
 
     by_tag = {}
     for nc in args.derive:
@@ -53,7 +62,7 @@ def main():
     written = []
     for lv in levels:
         cl = aggregate.combine_level(lv, by_tag, reference=args.reference)
-        ds = emit.build_level_dataset(cl, args.tag, args.collaborators)
+        ds = emit.build_level_dataset(cl, args.tag, args.collaborators, baseline)
         path = os.path.join(args.out, emit.filename(cl, args.tag))
         ds.to_netcdf(path, engine="netcdf4")
         written.append(path)

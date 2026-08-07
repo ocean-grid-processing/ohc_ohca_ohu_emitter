@@ -9,9 +9,9 @@ ohc_ingest ─▶ publish ─▶ ohc_derive (integral_anom,integral_tendency,are
 ```
 
 It's the sibling of `ohc_gcos_emitter`: same synthetic layers, same shallowest-first `n_fac`
-combination, same yearly-member-spread SD. The differences are the quantities (OHCA/OHU vs GCOS's
-J/m²/ZJ/temp) and, crucially, **no baseline window** — OHCA is already referenced to its whole-record
-mean upstream, so this emitter just annualizes.
+combination, same yearly-member-spread SD, same baseline-window subtraction. The differences are the
+quantities (`ohca`/`ohu` vs GCOS's J/m²/ZJ/temp), the per-level file layout, and a `time_ohca`
+axis (days since 2004-06-01) rather than `years`.
 
 ## What it computes
 
@@ -26,10 +26,12 @@ OHU_L(t)  = Σᵢ n_facᵢ · OHUᵢ(t)           # TJ
 area_L    = area_total of the shallowest contributor
 ```
 
-Both combinations are linear, so `n_fac` weighting applies identically to OHCA and OHU. Because OHCA
-is already a whole-record anomaly per layer and the mean is linear, the combined OHCA is the correct
-anomaly of the combined integral — no re-referencing. The **export** then takes the annual mean of
-each combined series and writes it per level.
+Both combinations are linear, so `n_fac` weighting applies identically to OHCA and OHU. The
+**export** annual-means each combined series, subtracts the baseline-window mean from `ohca`
+(GCOS-style; because OHCA already had its whole-record mean removed, that all-time mean cancels, so
+this is exactly windowing the raw integral), and writes `ohca`/`ohu` (+ optional `_sd`) per level on
+a `time_ohca` axis. `ohu` is not baselined (it's a rate); nor is the SD (a constant offset leaves the
+member spread unchanged).
 
 **Error bars.** If the derive inputs carried the ensemble (`--keep-members
 integral_anom,integral_tendency`), each value gets a `*_sd`: per layer, the ensemble std of the
@@ -63,14 +65,17 @@ python combine.py DERIVE_*.nc --tag "OHCA-OHU 2026 <run>" [--levels ...] [--out 
 | `DERIVE_*.nc` (positional, 1+) | *(required)* | the `ohc_derive` outputs, one per mapped layer, built with `--transforms integral_anom,integral_tendency,area` (add `--keep-members integral_anom,integral_tendency` for `*_sd`). |
 | `--tag` | *(required)* | run tag; lowercased/space-stripped into the filenames and the `description`. |
 | `--levels` | all in `layers.py` | comma list of combined levels to emit. |
+| `--ref-window` | `2005:2024` | baseline-mean window `YEAR0:YEAR1` subtracted from annual `ohca` (guessed to match GCOS; the SD is left un-baselined). Separator `-` or `:`. |
 | `--collaborators` | `LocalGP by Giglio, Sukianto, Kuusela, Mills` | `description` suffix. |
 | `--reference` | `shallowest` | combined-layer reference area; only `shallowest` is implemented. |
 | `--out` | `.` | output directory (created if absent). |
 
 ## Opinionated choices
 
-- **No baseline window.** OHCA is anomaly-referenced upstream (`integral_anom`, whole-record mean);
-  this emitter never subtracts a window. That's the deliberate difference from the GCOS emitter.
+- **Baseline window, guessed to match GCOS** (`--ref-window`, default `2005:2024`). The target's
+  values are ~2 orders of magnitude smaller than an un-baselined anomaly, so it almost certainly
+  referenced to a window; with no source for it we assume GCOS's. Applied to `ohca` only (`ohu` is a
+  rate); the SD is left un-baselined (a constant offset doesn't change the spread).
 - **Error bars are a worst-case linear sum**, `n_fac`-weighted across contributors and treated as
   fully correlated — matching the GCOS convention. All-or-nothing.
 - **Reference area = shallowest contributor**, same `reference=shallowest` policy as GCOS; the
