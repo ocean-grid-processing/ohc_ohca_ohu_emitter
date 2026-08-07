@@ -8,8 +8,8 @@ inputs carried the ensemble.
 
 Output is per-area densities to match the target (Zenodo 14720478 v4.0.0): `ohca` J/m², `ohu` W/m².
 The combine works in basin-integrated TJ, so the export divides by the reference area (and scales
-TJ->J, and OHU / seconds-per-month). Still to reconcile against the target: the exact variable names
-/ file layout, the OHU seconds-per-month convention, and the t0 / partial-year handling for OHU.
+TJ->J, and OHU / seconds-per-month with a round 30-day month to match the target). Still to reconcile:
+the exact variable names / file layout, and the t0 / partial-year handling for OHU.
 """
 import numpy as np
 import pandas as pd
@@ -17,12 +17,19 @@ import xarray as xr
 
 EPOCH = "2004-06-01"     # time_ohca reference; each year anchored at its 1-June
 TERA = 1e12              # TJ -> J
-SEC_PER_MONTH = 365.25 / 12.0 * 86400.0   # idealized month, matching derive's trend axis
+# OHU per-month -> per-second factor: a round 30-day month (= 360-day year), matching the target
+# (their OHU is 30.4375/30 = 1.0146x a 365.25/12 month, constant across years). This is a
+# target-matching convention and is deliberately NOT derive's 365.25/12 trend-axis month.
+SEC_PER_MONTH = 30.0 * 86400.0
 
 
-def _yearly(series):
-    """Monthly (time,) series -> calendar-year mean (year,), float64."""
-    return series.astype("float64").groupby("time.year").mean("time")
+def _yearly(series, skipna=True):
+    """Monthly (time,) series -> calendar-year mean (year,), float64.
+
+    `skipna=False` makes any year with a missing month collapse to NaN — used for OHU so the first
+    year (whose t0 tendency is NaN, no prior month) is filled rather than averaged over 11 months.
+    """
+    return series.astype("float64").groupby("time.year").mean("time", skipna=skipna)
 
 
 def _time_ohca(years):
@@ -39,16 +46,14 @@ def build_level_dataset(cl, tag, collaborators):
 
     Emits per-area densities to match the target (Zenodo 14720478 v4.0.0): `ohca` in J/m², `ohu` in
     W/m². The combine gives basin-integrated TJ / TJ-per-month, so each is divided by the reference
-    area and scaled TJ->J (`× TERA`); `ohu` additionally / seconds-per-month (idealized month, same
-    convention as derive's trend). No baseline window — `ohca` is the whole-record anomaly from
-    derive's `integral_anom`. SDs carry the same per-area/units conversion as their values.
-
-    (The OHU seconds/month factor is a convention: idealized `365.25/12` vs each month's actual
-    length. Confirm against the target's own numbers if OHU is slightly off.)
+    area and scaled TJ->J (`× TERA`); `ohu` additionally / seconds-per-month, using a round 30-day
+    month (= 360-day year) to match the target — see SEC_PER_MONTH. No baseline window — `ohca` is
+    the whole-record anomaly from derive's `integral_anom`. SDs carry the same per-area/units
+    conversion as their values.
     """
     area = cl["area"]
     ohca_yr = _yearly(cl["ohca"])
-    ohu_yr = _yearly(cl["ohu"])
+    ohu_yr = _yearly(cl["ohu"], skipna=False)        # first year (t0 NaN) -> fill, not an 11-mo mean
     years = ohca_yr["year"].values.astype("int64")
 
     def to_jm2(tj):                       # TJ -> J/m^2

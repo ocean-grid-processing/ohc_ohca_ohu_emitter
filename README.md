@@ -16,9 +16,8 @@ than `years`, and no baseline window (the anomaly is referenced upstream in deri
 > **Units:** output matches the target (Zenodo 14720478 v4.0.0) — **`ohca` in J/m²**, **`ohu` in
 > W/m²** (per-area *densities*; the W/m² and W/m²/s in the file are the *trend* attributes). The
 > combine works in basin-integrated TJ, so the export divides by the reference area and scales
-> (`ohca = ohca[TJ]/area × 1e12`; `ohu = ohu[TJ/mo]/area × 1e12 / sec_per_month`, idealized
-> `365.25/12` month). Confirm the OHU seconds-per-month convention against the target if `ohu` is
-> slightly off.
+> (`ohca = ohca[TJ]/area × 1e12`; `ohu = ohu[TJ/mo]/area × 1e12 / sec_per_month`, using a **round
+> 30-day month** = 360-day year to match the target — their OHU is 1.0146× a `365.25/12` month).
 
 ## What it computes
 
@@ -89,9 +88,10 @@ python combine.py DERIVE_*.nc --tag "OHCA-OHU 2026 <run>" [--levels ...] [--out 
 
 Reconcile against the target (Zenodo 14720478 v4.0.0):
 
-- **OHU seconds-per-month** convention: the export uses the idealized `365.25/12` month (same as
-  derive's trend axis). If `ohu` is slightly off against the target, this is the first knob — the
-  target may use each month's actual length instead. (`ohca` is unaffected.)
+- **OHU seconds-per-month = round 30-day month** (= 360-day year), matching the target — *not*
+  derive's `365.25/12` trend-axis month. This is the one target-matching magic number; the target's
+  OHU is 1.0146× a `365.25/12` month, constant across years, so a fixed 30-day month is the fit.
+  (`ohca` is unaffected.)
 - **t0 / partial-year** handling for OHU (NaN at t0 vs a dropped first year), and the exact
   **anomaly baseline** convention if it turns out the target isn't a plain whole-record anomaly.
 

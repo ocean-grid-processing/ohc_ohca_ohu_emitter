@@ -23,9 +23,13 @@ ensemble.
 import xarray as xr
 
 
-def _yearly_member_std(ens):
-    """Ensemble std of the yearly mean: yearly-mean per member, then std across members (ddof=1)."""
-    return ens.groupby("time.year").mean("time").std("member", ddof=1)      # (year,)
+def _yearly_member_std(ens, skipna=True):
+    """Ensemble std of the yearly mean: yearly-mean per member, then std across members (ddof=1).
+
+    `skipna=False` fills any year with a missing month (used for OHU, whose t0 tendency is NaN), so
+    the first year's SD matches its filled value rather than being an 11-month spread.
+    """
+    return ens.groupby("time.year").mean("time", skipna=skipna).std("member", ddof=1)   # (year,)
 
 
 def read_layer(nc):
@@ -50,7 +54,8 @@ def read_layer(nc):
                and "ohc_integral_tendency_ens" in ds.data_vars)
     if has_ens:
         ohca_sd_yearly = _yearly_member_std(ds["ohc_integral_anom_ens"].astype("float64"))
-        ohu_sd_yearly = _yearly_member_std(ds["ohc_integral_tendency_ens"].astype("float64"))
+        ohu_sd_yearly = _yearly_member_std(ds["ohc_integral_tendency_ens"].astype("float64"),
+                                           skipna=False)     # first year (t0 NaN) -> fill
 
     return {
         "tag": str(tag),
