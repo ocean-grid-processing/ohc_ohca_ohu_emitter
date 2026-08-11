@@ -20,6 +20,14 @@ import aggregate
 import emit
 
 
+def _add_provenance(ds, args):
+    """Stamp provenance attrs onto an output header when supplied (which localGP run + git hashes)."""
+    if args.provenance_tag is not None:
+        ds.attrs["provenance_tag"] = args.provenance_tag
+    if args.provenance_link is not None:
+        ds.attrs["provenance_link"] = args.provenance_link
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("derive", nargs="+", help="ohc_derive .nc files, one per mapped layer")
@@ -29,6 +37,11 @@ def main():
     ap.add_argument("--collaborators", default="LocalGP by Giglio, Sukianto, Kuusela, Mills")
     ap.add_argument("--reference", default="shallowest",
                     help="combined-layer reference area (only 'shallowest' implemented)")
+    ap.add_argument("--provenance-tag", default=None,
+                    help="provenance id written to the header (e.g. the localGP run + component "
+                         "git hashes)")
+    ap.add_argument("--provenance-link", default=None,
+                    help="URL/path to the provenance record for this output")
     ap.add_argument("--out", default=".")
     args = ap.parse_args()
 
@@ -54,6 +67,7 @@ def main():
     for lv in levels:
         cl = aggregate.combine_level(lv, by_tag, reference=args.reference)
         ds = emit.build_level_dataset(cl, args.tag, args.collaborators)
+        _add_provenance(ds, args)
         path = os.path.join(args.out, emit.filename(cl, args.tag))
         enc = {v: {"_FillValue": -999.0} for v in ds.data_vars}   # target's fill value (NaN -> -999)
         ds.to_netcdf(path, engine="netcdf4", encoding=enc)
