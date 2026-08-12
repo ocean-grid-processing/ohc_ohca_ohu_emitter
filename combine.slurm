@@ -16,7 +16,7 @@ module load anaconda/2023.09
 conda activate ohc_crosscheck
 
 cd $SLURM_SUBMIT_DIR
-python combine.py \
-  data/*.nc \
-  --tag "validation" \
-  --levels 0_300,0_700,700_2000,0_2000
+python combine.py /scratch/alpine/wimi7695/ohc_prod/results/derive_${1}-ohca-ohu_2004_2025_lev* --tag $1 --provenance-link https://github.com/argovis/ohc_ohca_ohu_emitter/releases/tag/$1 \
+  --levels 0_300,0_700,0_1000,700_2000,0_2000 --time-window 2005:2024
+
+
