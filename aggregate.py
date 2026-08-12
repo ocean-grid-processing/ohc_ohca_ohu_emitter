@@ -58,26 +58,35 @@ def _ols_slope(y):
     return float((xc * (y - y.mean())).sum() / (xc * xc).sum())
 
 
-def _layer_trend(central, ens, skipna):
+def _in_window(annual, window):
+    """Slice an annual (year,) series to an inclusive (year0, year1) window; window None = all years."""
+    if window is None:
+        return annual
+    return annual.sel(year=slice(window[0], window[1]))
+
+
+def _layer_trend(central, ens, skipna, window=None):
     """Per-layer OLS trend of the annual (mean) series, per year-step, in the input's (integral) units.
 
     Returns (central_slope, slope_uq): central_slope from the mean-field series; slope_uq the std
-    (ddof=1) across ensemble members of their per-member slopes, or None without an ensemble.
+    (ddof=1) across ensemble members of their per-member slopes, or None without an ensemble. The fit
+    is restricted to `window` (inclusive year range) when given; None fits every year present.
     """
-    central_slope = _ols_slope(_annual(central, skipna).values)
+    central_slope = _ols_slope(_in_window(_annual(central, skipna), window).values)
     if ens is None:
         return central_slope, None
-    ann = _annual(ens, skipna)                                            # (member, year)
+    ann = _in_window(_annual(ens, skipna), window)                       # (member, year)
     slopes = np.array([_ols_slope(ann.isel(member=k).values)
                        for k in range(ann.sizes["member"])], dtype="float64")
     return central_slope, float(np.nanstd(slopes, ddof=1))
 
 
-def read_layer(nc):
+def read_layer(nc, window=None):
     """Read one mapped layer's OHCA/OHU derive output into a dict.
 
     Returns tag, ohca(time) [TJ], ohu(time) [TJ], area [m^2], top/bottom [m], cp0, rho0, period, and
-    `ohca_sd_yearly`/`ohu_sd_yearly` (year,) [TJ] if the `_ens` siblings are present, else None.
+    `ohca_sd_yearly`/`ohu_sd_yearly` (year,) [TJ] if the `_ens` siblings are present, else None. The
+    OHCA/OHU trends are fit over `window` (inclusive year range) when given; None fits all years.
     """
     ds = xr.open_dataset(nc, decode_times=True)
     a = ds.attrs
@@ -107,8 +116,8 @@ def read_layer(nc):
 
     # OLS trend: central slope from the reported value (anomaly); its spread from the absolute members
     # (a slope is offset-invariant, so the two are consistent). ohu drops its NaN t0 year.
-    ohca_trend, ohca_trend_uq = _layer_trend(ohca_da, ohca_ens, skipna=True)
-    ohu_trend, ohu_trend_uq = _layer_trend(ohu_da, ohu_ens, skipna=False)
+    ohca_trend, ohca_trend_uq = _layer_trend(ohca_da, ohca_ens, skipna=True, window=window)
+    ohu_trend, ohu_trend_uq = _layer_trend(ohu_da, ohu_ens, skipna=False, window=window)
 
     return {
         "tag": str(tag),

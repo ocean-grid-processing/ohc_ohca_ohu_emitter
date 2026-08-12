@@ -62,6 +62,19 @@ def test_ols_slope_recovers_line():
     assert abs(aggregate._ols_slope(y2) - 2.0) < 1e-12
 
 
+def test_layer_trend_window_restricts_fit():
+    # Monthly series whose annual mean is (year-2000)^2 -> the OLS slope over 0..9 is 9.0, but over
+    # the 2000-2004 window (annual values 0,1,4,9,16) it is 4.0. Proves --time-window slices the fit.
+    import numpy as np
+    import pandas as pd
+    import xarray as xr
+    time = pd.date_range("2000-01-01", "2009-12-01", freq="MS")
+    y = ((time.year.values - 2000) ** 2).astype("float64")
+    da = xr.DataArray(y, dims=("time",), coords={"time": time})
+    assert np.isclose(aggregate._layer_trend(da, None, skipna=True, window=None)[0], 9.0)
+    assert np.isclose(aggregate._layer_trend(da, None, skipna=True, window=(2000, 2004))[0], 4.0)
+
+
 def test_combine_trend_and_uq_linear():
     by = {
         "15_20": make_layer("15_20", 15, 20, area=100.0, ohca=[1.0], ohu=[1.0],

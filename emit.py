@@ -44,20 +44,28 @@ def _time_ohca(years):
                                "calendar": "proleptic_gregorian", "long_name": "time"})
 
 
-def build_level_dataset(cl, tag, collaborators):
+def build_level_dataset(cl, tag, collaborators, window=None):
     """One combined level's result -> an xr.Dataset over `time_ohca` with ohca, ohu (+ optional `_sd`).
 
     Emits per-area densities to match the target (Zenodo 14720478 v4.0.0): `ohca` in J/m², `ohu` in
     W/m². The combine gives basin-integrated TJ / TJ-per-month, so each is divided by the reference
     area and scaled TJ->J (`× TERA`); `ohu` additionally / seconds-per-month, using a round 30-day
-    month (= 360-day year) to match the target — see SEC_PER_MONTH. No baseline window — `ohca` is
-    the whole-record anomaly from derive's `integral_anom`. SDs carry the same per-area/units
+    month (= 360-day year) to match the target — see SEC_PER_MONTH. SDs carry the same per-area/units
     conversion as their values.
+
+    `window` (inclusive year range, or None) sets the OHCA anomaly baseline and the trend-fit years.
+    None (default) keeps the whole-record anomaly from derive's `integral_anom` (the validated form);
+    a window re-references OHCA to that period's mean. The full annual series is always reported —
+    the window only moves the reference level and the trend fit, never truncates the output. OHU has
+    no baseline (it's a tendency), so a window touches only its trend, set upstream in read_layer.
     """
     area = cl["area"]
     ohca_yr = _yearly(cl["ohca"])
+    if window is not None:                           # re-reference OHCA to the window-period mean
+        ohca_yr = ohca_yr - ohca_yr.sel(year=slice(window[0], window[1])).mean("year")
     ohu_yr = _yearly(cl["ohu"], skipna=False)        # first year (t0 NaN) -> fill, not an 11-mo mean
     years = ohca_yr["year"].values.astype("int64")
+    base_label = ("%d-%d mean" % (window[0], window[1])) if window else "all-time mean"
 
     def to_jm2(tj):                       # TJ -> J/m^2
         return tj / area * TERA
@@ -69,7 +77,7 @@ def build_level_dataset(cl, tag, collaborators):
     dv = {
         "ohca": xr.DataArray(to_jm2(ohca_yr.values), dims=("time_ohca",),
                              attrs={"units": "J/m2", "area_m2": area,
-                                    "long_name": "annual OHC anomaly (all-time mean removed)"}),
+                                    "long_name": "annual OHC anomaly (%s removed)" % base_label}),
         "ohu": xr.DataArray(to_wm2(ohu_yr.values), dims=("time_ohca",),
                             attrs={"units": "W/m2", "area_m2": area,
                                    "long_name": "annual mean ocean heat uptake"}),
@@ -92,10 +100,13 @@ def build_level_dataset(cl, tag, collaborators):
 
     out = xr.Dataset(dv, coords={"time_ohca": time})
     out.attrs["level"] = cl["name"]
+    # The OHCA baseline period and the OHCA/OHU trend-fit window (the full series is still reported).
+    out.attrs["time_window"] = ("%d-%d" % (window[0], window[1])) if window else "all"
     out.attrs["description"] = "%s, %s" % (tag, collaborators)
     return out
 
 
 def filename(cl, tag):
     """Target-style per-level name: ohca_ohu_<lo>_<hi>_dbar_<tag>.nc"""
-    return "ohca_ohu_%d_%d_dbar_%s.nc" % (cl["low"], cl["high"], tag.lower().replace(" ", ""))
+    # `tag` is already whitespace-sanitized by the CLI; used verbatim (no lowercasing/munging).
+    return "ohca_ohu_%d_%d_dbar_%s.nc" % (cl["low"], cl["high"], tag)

@@ -11,7 +11,8 @@ ohc_ingest ─▶ publish ─▶ ohc_derive (integral,integral_anom,integral_ten
 It's the sibling of `ohc_gcos_emitter`: same synthetic layers, same shallowest-first `n_fac`
 combination, same yearly-member-spread SD. The differences are the quantities (`ohca`/`ohu` vs
 GCOS's J/m²/ZJ/temp), the per-level file layout, a `time_ohca` axis (days since 2004-06-01) rather
-than `years`, and no baseline window (the anomaly is referenced upstream in derive).
+than `years`, and the baseline: by default the anomaly is the whole-record mean referenced upstream
+in derive, with `--time-window` as an optional GCOS-style baseline/trend window (off by default).
 
 > **Units:** output matches the target (Zenodo 14720478 v4.0.0) — **`ohca` in J/m²**, **`ohu` in
 > W/m²** (per-area *densities*; the W/m² and W/m²/s in the file are the *trend* attributes). The
@@ -35,8 +36,10 @@ area_L    = area_total of the shallowest contributor
 Both combinations are linear, so `n_fac` weighting applies identically to OHCA and OHU. The
 **export** annual-means each combined series, converts to per-area densities (`ohca` J/m², `ohu`
 W/m² — divide by the reference area, scale TJ→J, and for `ohu` also / seconds-per-month), and writes
-`ohca`/`ohu` (+ optional `_std`) per level on a `time_ohca` axis. No baseline window — `ohca` is
-already referenced to its whole-record mean upstream (`integral_anom`).
+`ohca`/`ohu` (+ optional `_std`) per level on a `time_ohca` axis. By default `ohca` keeps its
+whole-record mean referencing from upstream (`integral_anom`); `--time-window YEAR0:YEAR1`
+re-references it to that period's mean and fits the OHCA/OHU trends over those years (the full
+series is still reported — see below).
 
 **Error bars.** If the derive inputs carried the ensemble (`--keep-members integral,integral_tendency`),
 each value gets a `*_std`: per layer, the ensemble std of the **yearly** value (yearly-mean per
@@ -67,7 +70,7 @@ docker container run -v $(pwd):/app ohc_ohca_ohu_emitter:test pytest
 
 ### Run
 ```bash
-python combine.py DERIVE_*.nc --tag "OHCA-OHU 2026 <run>" [--levels ...] [--out DIR]
+python combine.py DERIVE_*.nc --tag OHCA-OHU-2026-<run> [--provenance-link URL] [--time-window 2005:2024] [--levels ...] [--out DIR]
 ```
 
 #### combine.py options
@@ -75,17 +78,23 @@ python combine.py DERIVE_*.nc --tag "OHCA-OHU 2026 <run>" [--levels ...] [--out 
 | option | default | effect |
 |---|---|---|
 | `DERIVE_*.nc` (positional, 1+) | *(required)* | the `ohc_derive` outputs, one per mapped layer, built with `--transforms integral,integral_anom,integral_tendency,area` (add `--keep-members integral,integral_tendency` for `*_std`). |
-| `--tag` | *(required)* | run tag; lowercased/space-stripped into the filenames and the `description`. |
+| `--tag` | *(required)* | provenance tag: whitespace-stripped (case preserved, no other munging) into the filenames and the `description`, and written to the `provenance_tag` header attr (pointer to the provenance record). Must match the provenance record char-for-char. |
+| `--provenance-link` | *(none)* | URL/path to the provenance record; written to the `provenance_link` header attr. |
 | `--levels` | all in `layers.py` | comma list of combined levels to emit. |
+| `--time-window` | *(all years)* | `YEAR0:YEAR1` inclusive window applied to **both** the OHCA anomaly baseline and the OHCA/OHU trend fits (e.g. `2005:2024`). The full annual series is still reported — the window only sets the reference level and the trend-fit years; OHU has no baseline (it's a tendency), so only its trend is affected. Recorded in the `time_window` header attr. Default (omitted) = whole record, i.e. the validated Zenodo-matching form. |
 | `--collaborators` | `LocalGP by Giglio, Sukianto, Kuusela, Mills` | `description` suffix. |
 | `--reference` | `shallowest` | combined-layer reference area; only `shallowest` is implemented. |
 | `--out` | `.` | output directory (created if absent). |
 
 ## Opinionated choices
 
-- **No baseline window.** `ohca` is referenced to its whole-record mean upstream (`integral_anom`);
-  this emitter doesn't subtract a window. (We briefly guessed a GCOS-style window to explain the
-  target being smaller, but the real gap is units — see below — so the window was dropped.)
+- **Baseline window is opt-in.** By default `ohca` keeps its whole-record mean referencing from
+  upstream (`integral_anom`) — no window — which is the form validated against the Zenodo target.
+  (We briefly guessed a GCOS-style window early on to explain the target being smaller, but the real
+  gap was units, so the default stays whole-record.) `--time-window YEAR0:YEAR1` opts into a GCOS-style
+  baseline over that period **and** fits the OHCA/OHU trends over it; the full series is still
+  reported. A window is a deliberate departure from the Zenodo-matching default — the reported OHCA
+  and trends will differ, by design.
 - **Error bars are a worst-case linear sum**, `n_fac`-weighted across contributors and treated as
   fully correlated — matching the GCOS convention. All-or-nothing.
 - **OHCA spread ← absolute integral members** (`ohc_integral_ens`), while the value is the anomaly.
@@ -109,7 +118,8 @@ Reconcile against the target (Zenodo 14720478 v4.0.0):
   derive's `365.25/12` trend-axis month. This is the one target-matching magic number; the target's
   OHU is 1.0146× a `365.25/12` month, constant across years, so a fixed 30-day month is the fit.
   (`ohca` is unaffected.)
-- **t0 / partial-year** handling for OHU (NaN at t0 vs a dropped first year), and the exact
-  **anomaly baseline** convention if it turns out the target isn't a plain whole-record anomaly.
+- **t0 / partial-year** handling for OHU (NaN at t0 vs a dropped first year). The **anomaly baseline**
+  is whole-record by default (matching the target); if a specific reference period is wanted, pass
+  `--time-window` (which also windows the trend fits).
 
 The combine-and-annualize core is agnostic to all of this; it's output formatting.
