@@ -1,42 +1,45 @@
-"""OHCA/OHU annual export: yearly mean of the combined series + ensemble SDs, one file per level.
+#!/usr/bin/env python3
+"""OHCA/OHU packaging: one ohc_derive blob -> the target per-area deliverable.
 
-No baseline windowing. OHCA arrives already referenced to its whole-record mean (ohc_derive's
-`integral_anom`), so annualizing it is the whole job — unlike the GCOS emitter, there is no
-2005-2024 window to subtract here. OHU is the annual mean of the monthly tendency (the NaN at t0
-drops out of the first year's mean by skipna). Each value gets a `*_sd` companion when the derive
-inputs carried the ensemble.
+The factory has already done the analysis — the n_fac cross-layer combine, the annual means, the OHCA
+baseline window, and the OLS trends. Its blob carries `ohca`/`ohu` (with their `_sd` and trends) as
+basin-integrated extensive quantities (TJ, and TJ per month), plus `area_m2`, the `level`, and the
+`time_window` it was built with. This step is only the packaging: divide by the area, carry the units
+to the target's per-area densities, relabel, and write one file per level.
 
-Output is per-area densities to match the target (Zenodo 14720478 v4.0.0): `ohca` J/m², `ohu` W/m².
-The combine works in basin-integrated TJ, so the export divides by the reference area (and scales
-TJ->J, and OHU / seconds-per-month with a round 30-day month to match the target). Still to reconcile:
-the exact variable names / file layout, and the t0 / partial-year handling for OHU.
+Target (Zenodo 14720478 v4.0.0): `ohca` in J/m2 and `ohu` in W/m2 on a `time_ohca` axis (days since
+2004-06-01, each year anchored at its 1-June), with the linear trends as attrs on each variable.
+
+OHU's first year is an 11-month partial (its t0 tendency has no prior month); this step blanks it to
+NaN for presentation, while the factory's annual mean and trend still use it.
 """
+import argparse
+import os
+
 import numpy as np
 import pandas as pd
 import xarray as xr
 
-EPOCH = "2004-06-01"     # time_ohca reference; each year anchored at its 1-June
-TERA = 1e12              # TJ -> J
-# OHU per-month -> per-second factor: a round 30-day month (= 360-day year), matching the target
-# (their OHU is 30.4375/30 = 1.0146x a 365.25/12 month, constant across years). This is a
-# target-matching convention and is deliberately NOT derive's 365.25/12 trend-axis month.
+EPOCH = "2004-06-01"        # time_ohca reference; each year anchored at its 1-June
+TERA = 1e12                 # TJ -> J
+# OHU per-month -> per-second: a round 30-day month (a 360-day year), matching the target's convention.
 SEC_PER_MONTH = 30.0 * 86400.0
-# Trend time axis: 365-day year, converting the OLS slope (per year-step) to per-second. Matches the
-# original's yearly trend (bfr_vars_num_sec_in_tstep = 365*24*60*60) — note 365, not 365.25.
+# Trend per year-step -> per-second: a 365-day year, matching the target's trend axis.
 SEC_PER_YEAR = 365.0 * 86400.0
 
 
-def _yearly(series, skipna=True):
-    """Monthly (time,) series -> calendar-year mean (year,), float64.
+def to_jm2(tj, area):
+    """Basin-integrated TJ -> per-area J/m2."""
+    return tj / area * TERA
 
-    `skipna=False` makes any year with a missing month collapse to NaN — used for OHU so the first
-    year (whose t0 tendency is NaN, no prior month) is filled rather than averaged over 11 months.
-    """
-    return series.astype("float64").groupby("time.year").mean("time", skipna=skipna)
+
+def to_wm2(tj_per_month, area):
+    """Basin-integrated TJ per month -> per-area W/m2."""
+    return tj_per_month / area * TERA / SEC_PER_MONTH
 
 
 def _time_ohca(years):
-    """Annual timestamps as days since EPOCH (each year anchored at its 1-June)."""
+    """Integer years -> days since EPOCH, each year anchored at its 1-June."""
     ref = pd.Timestamp(EPOCH)
     days = np.array([(pd.Timestamp("%d-06-01" % y) - ref).days for y in years], dtype="float64")
     return xr.DataArray(days, dims=("time_ohca",),
@@ -44,69 +47,82 @@ def _time_ohca(years):
                                "calendar": "proleptic_gregorian", "long_name": "time"})
 
 
-def build_level_dataset(cl, tag, collaborators, window=None):
-    """One combined level's result -> an xr.Dataset over `time_ohca` with ohca, ohu (+ optional `_sd`).
+def build_dataset(blob, tag, provenance_link):
+    """A derive blob -> the OHCA/OHU deliverable Dataset over `time_ohca`."""
+    area = float(blob.attrs["area_m2"])
+    window = blob.attrs.get("time_window", "all")
+    baseline = "all-time mean" if window == "all" else "%s mean" % window
 
-    Emits per-area densities to match the target (Zenodo 14720478 v4.0.0): `ohca` in J/m², `ohu` in
-    W/m². The combine gives basin-integrated TJ / TJ-per-month, so each is divided by the reference
-    area and scaled TJ->J (`× TERA`); `ohu` additionally / seconds-per-month, using a round 30-day
-    month (= 360-day year) to match the target — see SEC_PER_MONTH. SDs carry the same per-area/units
-    conversion as their values.
+    time = _time_ohca(blob["ohca"]["year"].values.astype("int64"))
 
-    `window` (inclusive year range, or None) sets the OHCA anomaly baseline and the trend-fit years.
-    None (default) keeps the whole-record anomaly from derive's `integral_anom` (the validated form);
-    a window re-references OHCA to that period's mean. The full annual series is always reported —
-    the window only moves the reference level and the trend fit, never truncates the output. OHU has
-    no baseline (it's a tendency), so a window touches only its trend, set upstream in read_layer.
-    """
-    area = cl["area"]
-    ohca_yr = _yearly(cl["ohca"])
-    if window is not None:                           # re-reference OHCA to the window-period mean
-        ohca_yr = ohca_yr - ohca_yr.sel(year=slice(window[0], window[1])).mean("year")
-    ohu_yr = _yearly(cl["ohu"], skipna=False)        # first year (t0 NaN) -> fill, not an 11-mo mean
-    years = ohca_yr["year"].values.astype("int64")
-    base_label = ("%d-%d mean" % (window[0], window[1])) if window else "all-time mean"
+    # OHU's first year is an 11-month partial (its t0 tendency has no prior month). The factory still
+    # averaged it, and the trend was fit including it; we blank it here purely for presentation.
+    ohu = to_wm2(blob["ohu"].values, area)
+    ohu[0] = np.nan
 
-    def to_jm2(tj):                       # TJ -> J/m^2
-        return tj / area * TERA
-
-    def to_wm2(tj_per_month):             # TJ/month -> W/m^2
-        return tj_per_month / area * TERA / SEC_PER_MONTH
-
-    time = _time_ohca(years)
     dv = {
-        "ohca": xr.DataArray(to_jm2(ohca_yr.values), dims=("time_ohca",),
+        "ohca": xr.DataArray(to_jm2(blob["ohca"].values, area), dims=("time_ohca",),
                              attrs={"units": "J/m2", "area_m2": area,
-                                    "long_name": "annual OHC anomaly (%s removed)" % base_label}),
-        "ohu": xr.DataArray(to_wm2(ohu_yr.values), dims=("time_ohca",),
+                                    "long_name": "annual OHC anomaly (%s removed)" % baseline}),
+        "ohu": xr.DataArray(ohu, dims=("time_ohca",),
                             attrs={"units": "W/m2", "area_m2": area,
                                    "long_name": "annual mean ocean heat uptake"}),
     }
-    if cl["ohca_sd_yearly"] is not None:
-        note = "worst-case ensemble 1-sigma: linear n_fac-weighted sum of per-layer yearly SDs"
-        dv["ohca_std"] = xr.DataArray(to_jm2(cl["ohca_sd_yearly"].sel(year=years).values),
-                                      dims=("time_ohca",), attrs={"units": "J/m2", "comment": note})
-        dv["ohu_std"] = xr.DataArray(to_wm2(cl["ohu_sd_yearly"].sel(year=years).values),
-                                     dims=("time_ohca",), attrs={"units": "W/m2", "comment": note})
+    if "ohca_sd" in blob:
+        note = "worst-case ensemble 1-sigma: n_fac-weighted sum of the per-constituent SDs"
+        ohu_sd = to_wm2(blob["ohu_sd"].values, area)
+        ohu_sd[0] = np.nan
+        dv["ohca_std"] = xr.DataArray(to_jm2(blob["ohca_sd"].values, area), dims=("time_ohca",),
+                                      attrs={"units": "J/m2", "comment": note})
+        dv["ohu_std"] = xr.DataArray(ohu_sd, dims=("time_ohca",),
+                                     attrs={"units": "W/m2", "comment": note})
 
-    # Linear trends as attrs: OLS slope of the annual series expressed per second. to_jm2/to_wm2 carry
-    # the same per-area (and per-month) conversion as the values; / SEC_PER_YEAR is the year-step ->
-    # per-second factor. ohca_trend in W/m², ohu_trend in W/m²/s (+ *_trend_uq when the ensemble is on).
-    dv["ohca"].attrs.update({"trend": to_jm2(cl["ohca_trend"]) / SEC_PER_YEAR, "trend_units": "W/m2"})
-    dv["ohu"].attrs.update({"trend": to_wm2(cl["ohu_trend"]) / SEC_PER_YEAR, "trend_units": "W/m2/s"})
-    if cl["ohca_trend_uq"] is not None:
-        dv["ohca"].attrs["trend_std"] = to_jm2(cl["ohca_trend_uq"]) / SEC_PER_YEAR
-        dv["ohu"].attrs["trend_std"] = to_wm2(cl["ohu_trend_uq"]) / SEC_PER_YEAR
+    # Linear trends as attrs, per second: /SEC_PER_YEAR turns the OLS per-year slope into per-second.
+    if "ohca_trend" in blob:
+        dv["ohca"].attrs.update({"trend": to_jm2(float(blob["ohca_trend"]), area) / SEC_PER_YEAR,
+                                 "trend_units": "W/m2"})
+    if "ohu_trend" in blob:
+        dv["ohu"].attrs.update({"trend": to_wm2(float(blob["ohu_trend"]), area) / SEC_PER_YEAR,
+                                "trend_units": "W/m2/s"})
+    if "ohca_trend_sd" in blob:
+        dv["ohca"].attrs["trend_std"] = to_jm2(float(blob["ohca_trend_sd"]), area) / SEC_PER_YEAR
+    if "ohu_trend_sd" in blob:
+        dv["ohu"].attrs["trend_std"] = to_wm2(float(blob["ohu_trend_sd"]), area) / SEC_PER_YEAR
 
     out = xr.Dataset(dv, coords={"time_ohca": time})
-    out.attrs["level"] = cl["name"]
-    # The OHCA baseline period and the OHCA/OHU trend-fit window (the full series is still reported).
-    out.attrs["time_window"] = ("%d-%d" % (window[0], window[1])) if window else "all"
-    out.attrs["description"] = "%s, %s" % (tag, collaborators)
+    out.attrs["level"] = blob.attrs["level"]
+    out.attrs["time_window"] = window
+    out.attrs["provenance_tag"] = tag
+    if provenance_link is not None:
+        out.attrs["provenance_link"] = provenance_link
     return out
 
 
-def filename(cl, tag):
-    """Target-style per-level name: ohca_ohu_<lo>_<hi>_dbar_<tag>.nc"""
-    # `tag` is already whitespace-sanitized by the CLI; used verbatim (no lowercasing/munging).
-    return "ohca_ohu_%d_%d_dbar_%s.nc" % (cl["low"], cl["high"], tag)
+def filename(level, tag):
+    """Target-style per-level name: ohca_ohu_<lo>_<hi>_dbar_<tag>.nc (low/high from the level)."""
+    low, high = level.split("_")
+    return "ohca_ohu_%s_%s_dbar_%s.nc" % (low, high, tag)
+
+
+def main():
+    ap = argparse.ArgumentParser(description="OHCA/OHU packaging: ohc_derive blob -> target deliverable")
+    ap.add_argument("blobs", nargs="+", help="ohc_derive output NetCDFs (derive_<tag>_<level>.nc)")
+    ap.add_argument("--tag", required=True, help="provenance tag: filename token + provenance_tag attr")
+    ap.add_argument("--provenance-link", default=None, help="URL/path to the provenance record")
+    ap.add_argument("--out", default=".")
+    cfg = ap.parse_args()
+    os.makedirs(cfg.out, exist_ok=True)
+    for path in cfg.blobs:
+        blob = xr.open_dataset(path)
+        if "ohca" not in blob or "ohu" not in blob:
+            raise SystemExit("%s carries no ohca/ohu; run ohc_derive with --quantities ohca,ohu (+ trends)"
+                             % path)
+        dest = os.path.join(cfg.out, filename(blob.attrs["level"], cfg.tag))
+        out = build_dataset(blob, cfg.tag, cfg.provenance_link)
+        enc = {v: {"_FillValue": -999.0} for v in out.data_vars}   # target fill (NaN -> -999)
+        out.to_netcdf(dest, engine="netcdf4", encoding=enc)
+        print("wrote", dest)
+
+
+if __name__ == "__main__":
+    main()
