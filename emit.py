@@ -10,8 +10,8 @@ to the target's per-area densities, relabel, and write one file per level.
 Target (Zenodo 14720478 v4.0.0): `ohca` in J/m2 and `ohu` in W/m2 on a `time_ohca` axis (days since
 2004-06-01, each year anchored at its 1-June), with the linear trends as attrs on each variable.
 
-OHU's first year is an 11-month partial (its t0 tendency has no prior month); this step blanks it to
-NaN for presentation, while the factory's annual mean and trend still use it.
+OHU's first year arrives NaN from the factory (its leading tendency step is undefined, so that year is
+voided upstream and excluded from the trend); it carries through here and lands as -999 on write.
 """
 import argparse
 import os
@@ -26,6 +26,12 @@ TERA = 1e12                 # TJ -> J
 SEC_PER_MONTH = 30.0 * 86400.0
 # Trend per year-step -> per-second: a 365-day year, matching the target's trend axis.
 SEC_PER_YEAR = 365.0 * 86400.0
+SEC_PER = {"year": SEC_PER_YEAR, "month": SEC_PER_MONTH}
+
+
+def _trend_seconds(trend_var):
+    """Seconds in one step of a trend's cadence, read from its `per` attr (default year)."""
+    return SEC_PER[trend_var.attrs.get("per", "year")]
 
 
 def to_jm2(tj, area):
@@ -54,40 +60,32 @@ def build_dataset(blob, tag, provenance_link):
     baseline = "all-time mean" if window == "all" else "%s mean" % window
 
     time = _time_ohca(blob["ohca"]["year"].values.astype("int64"))
-
-    # OHU's first year is an 11-month partial (its t0 tendency has no prior month). The factory still
-    # averaged it, and the trend was fit including it; we blank it here purely for presentation.
-    ohu = to_wm2(blob["ohu"].values, area)
-    ohu[0] = np.nan
-
     dv = {
         "ohca": xr.DataArray(to_jm2(blob["ohca"].values, area), dims=("time_ohca",),
                              attrs={"units": "J/m2", "area_m2": area,
                                     "long_name": "annual OHC anomaly (%s removed)" % baseline}),
-        "ohu": xr.DataArray(ohu, dims=("time_ohca",),
+        "ohu": xr.DataArray(to_wm2(blob["ohu"].values, area), dims=("time_ohca",),
                             attrs={"units": "W/m2", "area_m2": area,
                                    "long_name": "annual mean ocean heat uptake"}),
     }
     if "ohca_sd" in blob:
         note = "worst-case ensemble 1-sigma: n_fac-weighted sum of the per-constituent SDs"
-        ohu_sd = to_wm2(blob["ohu_sd"].values, area)
-        ohu_sd[0] = np.nan
         dv["ohca_std"] = xr.DataArray(to_jm2(blob["ohca_sd"].values, area), dims=("time_ohca",),
                                       attrs={"units": "J/m2", "comment": note})
-        dv["ohu_std"] = xr.DataArray(ohu_sd, dims=("time_ohca",),
+        dv["ohu_std"] = xr.DataArray(to_wm2(blob["ohu_sd"].values, area), dims=("time_ohca",),
                                      attrs={"units": "W/m2", "comment": note})
 
-    # Linear trends as attrs, per second: /SEC_PER_YEAR turns the OLS per-year slope into per-second.
+    # Linear trends as attrs, per second: the trend's `per` attr picks the seconds in one step.
     if "ohca_trend" in blob:
-        dv["ohca"].attrs.update({"trend": to_jm2(float(blob["ohca_trend"]), area) / SEC_PER_YEAR,
-                                 "trend_units": "W/m2"})
+        sec = _trend_seconds(blob["ohca_trend"])
+        dv["ohca"].attrs.update({"trend": to_jm2(float(blob["ohca_trend"]), area) / sec, "trend_units": "W/m2"})
+        if "ohca_trend_sd" in blob:
+            dv["ohca"].attrs["trend_std"] = to_jm2(float(blob["ohca_trend_sd"]), area) / sec
     if "ohu_trend" in blob:
-        dv["ohu"].attrs.update({"trend": to_wm2(float(blob["ohu_trend"]), area) / SEC_PER_YEAR,
-                                "trend_units": "W/m2/s"})
-    if "ohca_trend_sd" in blob:
-        dv["ohca"].attrs["trend_std"] = to_jm2(float(blob["ohca_trend_sd"]), area) / SEC_PER_YEAR
-    if "ohu_trend_sd" in blob:
-        dv["ohu"].attrs["trend_std"] = to_wm2(float(blob["ohu_trend_sd"]), area) / SEC_PER_YEAR
+        sec = _trend_seconds(blob["ohu_trend"])
+        dv["ohu"].attrs.update({"trend": to_wm2(float(blob["ohu_trend"]), area) / sec, "trend_units": "W/m2/s"})
+        if "ohu_trend_sd" in blob:
+            dv["ohu"].attrs["trend_std"] = to_wm2(float(blob["ohu_trend_sd"]), area) / sec
 
     out = xr.Dataset(dv, coords={"time_ohca": time})
     out.attrs["level"] = blob.attrs["level"]
