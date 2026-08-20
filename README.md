@@ -42,6 +42,28 @@ is W/m²/s.
 factory averaged it and fit the trend including it; this emitter blanks that first year to NaN for
 presentation only — the trend is unchanged.
 
+## Building the input
+
+`ohc_ohca_ohu_emitter` consumes one `ohc_derive` blob per synthetic level. To match the Zenodo target,
+build them with the whole-record baseline — i.e. **no `--time-window`** (the 2005:2024 window is
+GCOS-only) — and the ensemble on:
+
+```bash
+python ../ohc_derive/run.py OHC_<constituents>.nc \
+    --level 0_2000 --bathy etopo60.nc --quantities ohca,ohu,ohca_trend,ohu_trend \
+    --tag <tag> --out <dir>
+```
+
+Each blob **must** carry:
+
+- data vars **`ohca`** and **`ohu`** (annual, extensive); **`ohca_trend`** / **`ohu_trend`** (each with
+  a `per` attr) for the trend attributes; and the `_sd` companions when the derive run kept the
+  ensemble. The emitter errors if `ohca`/`ohu` are absent, and skips the trend/`_sd` outputs that
+  aren't present.
+- attrs **`area_m2`**, **`level`**, and **`time_window`** (which becomes the OHCA baseline label).
+
+`cp0`/`rho0` are not used here (they're a GCOS thing), so they need not be present.
+
 ## Usage
 
 ### Test
