@@ -17,7 +17,7 @@ conda activate ohc_crosscheck
 
 cd $SLURM_SUBMIT_DIR
 python emit.py \
-  /scratch/alpine/wimi7695/ohc_prod/results/derive_prod_260824-ohca-ohu_0_2000.nc \
-  --tag prod_260824 \
-  --provenance-link https://github.com/argovis/ohc_map_emitter/releases/tag/prod_260824 \
-  --out /scratch/alpine/wimi7695/ohc_prod/results
+  /scratch/alpine/wimi7695/ohc_prod/results_260824/derive_260824-OP20260507-ohca-ohu_0_2000.nc \
+  --tag 260824-OP20260507 \
+  --provenance-link https://github.com/argovis/ohc_map_emitter/releases/tag/260824-OP20260507 \
+  --out /scratch/alpine/wimi7695/ohc_prod/results_260824
