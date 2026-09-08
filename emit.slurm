@@ -16,8 +16,10 @@ module load anaconda/2023.09
 conda activate ohc_crosscheck
 
 cd $SLURM_SUBMIT_DIR
+tag=260824-OP20260507
+results=/scratch/alpine/wimi7695/ohc_prod/results_260824
 python emit.py \
-  /scratch/alpine/wimi7695/ohc_prod/results_260824/derive_260824-OP20260507-ohca-ohu_0_2000.nc \
-  --tag 260824-OP20260507 \
+  ${results}/derive_${tag}-ohca-ohu_0_2000.nc \
+  --tag ${tag} \
   --provenance-link https://github.com/argovis/ohc_map_emitter/releases/tag/260824-OP20260507 \
-  --out /scratch/alpine/wimi7695/ohc_prod/results_260824
+  --out ${results}
