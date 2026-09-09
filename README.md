@@ -74,20 +74,29 @@ docker container run -v $(pwd):/app ohc_ohca_ohu_emitter:test pytest
 
 ### Run
 ```bash
-python emit.py derive_<tag>_<level>.nc [more levels …] --tag <tag> [--provenance-link URL] [--out DIR]
+python emit.py derive_<tag>_<window>_<level>.nc [more levels …] --tag <tag> --code-version URL \
+    [--provenance-link URL] [--out DIR]
 ```
 
 One blob in, one deliverable out, per level. Run `ohc_derive` first with at least `--quantities
 ohca,ohu` (add `ohca_trend,ohu_trend` for the trend attrs; run without `--no-ensemble` for the `_std`
 companions).
 
+**Provenance chain.** Since each deliverable is built from one derive blob, this step is a 1-in-1-out
+courier: it rolls that blob's whole provenance chain forward untouched — every `*_run_config` /
+`*_run_facts` / `*_code_version` (the grouped `localgp_ingest_*` / `localgp_publish_*` and the
+`ohc_derive_*` blocks) as opaque JSON strings — and adds its own `ohc_ohca_ohu_emitter_run_config`
+(resolved args), `ohc_ohca_ohu_emitter_run_facts` (level, window, area, quantities, source blob), and
+`ohc_ohca_ohu_emitter_code_version`. The global `provenance_tag` / `provenance_link` are this step's own.
+
 #### emit.py options
 
 | option | default | effect |
 |---|---|---|
-| `derive_*.nc` (positional, 1+) | *(required)* | `ohc_derive` blobs, one per synthetic level (`derive_<tag>_<level>.nc`). Each must carry `ohca` and `ohu`. |
+| `derive_*.nc` (positional, 1+) | *(required)* | `ohc_derive` blobs, one per synthetic level (`derive_<tag>_<window>_<level>.nc`). Each must carry `ohca` and `ohu`. Point at the whole-record window (no `--time-window`), not gcos's 2005-2024. |
 | `--tag` | *(required)* | run token in the filename (`ohca_ohu_<lo>_<hi>_dbar_<tag>.nc`) and the `provenance_tag` attr. Used verbatim; should match the tag the blob was derived under. |
 | `--provenance-link` | *(none)* | URL/path to the provenance record; written to the `provenance_link` attr. |
+| `--code-version` | *(required)* | URL to the exact ohc_ohca_ohu_emitter code (commit/release); written to the `ohc_ohca_ohu_emitter_code_version` attr. |
 | `--out` | `.` | output directory (created if absent). |
 
 ## Notes

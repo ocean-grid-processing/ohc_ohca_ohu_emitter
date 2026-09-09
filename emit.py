@@ -14,6 +14,7 @@ OHU's first year arrives NaN from the factory (its leading tendency step is unde
 voided upstream and excluded from the trend); it carries through here and lands as -999 on write.
 """
 import argparse
+import json
 import os
 
 import numpy as np
@@ -27,6 +28,35 @@ SEC_PER_MONTH = 30.0 * 86400.0
 # Trend per year-step -> per-second: a 365-day year, matching the target's trend axis.
 SEC_PER_YEAR = 365.0 * 86400.0
 SEC_PER = {"year": SEC_PER_YEAR, "month": SEC_PER_MONTH}
+
+# This step's identity, used to namespace its provenance (`ohc_ohca_ohu_emitter_run_config` etc.).
+# Each output file is built from one derive blob (one level), so this step is a 1-in-1-out courier: it
+# rolls the blob's whole provenance chain forward verbatim and adds its own block.
+STAGE = "ohc_ohca_ohu_emitter"
+_PROV_SUFFIXES = ("_run_config", "_run_facts", "_code_version")
+
+
+def _compact(obj):
+    """One-line JSON — reads as a single clean line in `ncdump -h`."""
+    return json.dumps(obj, separators=(",", ":"), default=str)
+
+
+def _stamp_provenance(out, blob, cfg, source_path):
+    """Roll the derive blob's provenance chain forward untouched (opaque strings — every
+    `*_run_config`/`_run_facts`/`_code_version`), then stamp this step's own block."""
+    for k, v in blob.attrs.items():
+        if k.endswith(_PROV_SUFFIXES):
+            out.attrs[k] = v
+    out.attrs["%s_code_version" % STAGE] = cfg.code_version
+    out.attrs["%s_run_config" % STAGE] = _compact(vars(cfg))
+    out.attrs["%s_run_facts" % STAGE] = _compact({
+        "level": blob.attrs.get("level"),
+        "time_window": blob.attrs.get("time_window", "all"),
+        "area_m2": float(blob.attrs["area_m2"]),
+        "quantities_present": [q for q in ("ohca", "ohu", "ohca_trend", "ohu_trend") if q in blob],
+        "ensemble": any(q + "_sd" in blob for q in ("ohca", "ohu")),
+        "source_blob": os.path.abspath(source_path),
+    })
 
 
 def _trend_seconds(trend_var):
@@ -104,9 +134,12 @@ def filename(level, tag):
 
 def main():
     ap = argparse.ArgumentParser(description="OHCA/OHU packaging: ohc_derive blob -> target deliverable")
-    ap.add_argument("blobs", nargs="+", help="ohc_derive output NetCDFs (derive_<tag>_<level>.nc)")
+    ap.add_argument("blobs", nargs="+", help="ohc_derive output NetCDFs (derive_<tag>_<window>_<level>.nc)")
     ap.add_argument("--tag", required=True, help="provenance tag: filename token + provenance_tag attr")
     ap.add_argument("--provenance-link", default=None, help="URL/path to the provenance record")
+    ap.add_argument("--code-version", required=True,
+                    help="URL to the exact ohc_ohca_ohu_emitter code (commit/release); stamped as "
+                         "ohc_ohca_ohu_emitter_code_version")
     ap.add_argument("--out", default=".")
     cfg = ap.parse_args()
     os.makedirs(cfg.out, exist_ok=True)
@@ -117,6 +150,7 @@ def main():
                              % path)
         dest = os.path.join(cfg.out, filename(blob.attrs["level"], cfg.tag))
         out = build_dataset(blob, cfg.tag, cfg.provenance_link)
+        _stamp_provenance(out, blob, cfg, path)                    # roll the chain forward + stamp our own
         enc = {v: {"_FillValue": -999.0} for v in out.data_vars}   # target fill (NaN -> -999)
         out.to_netcdf(dest, engine="netcdf4", encoding=enc)
         print("wrote", dest)
