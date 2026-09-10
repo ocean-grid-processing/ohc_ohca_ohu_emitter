@@ -29,9 +29,10 @@ SEC_PER_MONTH = 30.0 * 86400.0
 SEC_PER_YEAR = 365.0 * 86400.0
 SEC_PER = {"year": SEC_PER_YEAR, "month": SEC_PER_MONTH}
 
-# This step's identity, used to namespace its provenance (`ohc_ohca_ohu_emitter_run_config` etc.).
-# Each output file is built from one derive blob (one level), so this step is a 1-in-1-out courier: it
-# rolls the blob's whole provenance chain forward verbatim and adds its own block.
+# This step's identity, used to key its block inside the consolidated `config_record`. Each output file
+# is built from one derive blob (one level), so this step is a 1-in-1-out courier: it rolls the blob's
+# whole provenance chain forward and folds its own block in, emitting the lot as one `config_record`
+# attribute (one attribute keeps the file in HDF5 compact storage — see `stamp_config_record`).
 STAGE = "ohc_ohca_ohu_emitter"
 _PROV_SUFFIXES = ("_run_config", "_run_facts", "_code_version")
 
@@ -71,55 +72,59 @@ def _compact_block(block, axis):
     return {"per_" + axis: dict(block)}
 
 
-def _constituents_roster(out):
-    """The constituents this file was built from, read off ohc_derive_run_facts (or None)."""
-    facts = out.attrs.get("ohc_derive_run_facts")
-    if not facts:
-        return None
+def _maybe_json(v):
+    """Parse a forwarded block back to JSON so it nests as a real object; leave non-JSON (a bare
+    code_version URL) as-is."""
     try:
-        c = json.loads(facts)
+        return json.loads(v)
     except (TypeError, ValueError):
-        return None
-    c = c.get("constituents") if isinstance(c, dict) else None
-    return c if isinstance(c, list) else None
+        return v
 
 
-def compact_provenance(out):
-    """DRY the forwarded provenance in place. Any top-level block that fans out over the constituents
-    roster (keys are a subset of it) is factored into shared + per_constituent — a lossless, reversible
-    pivot. Driven by the recorded roster, so only genuine per-constituent fan-outs are touched (a value
-    like `n_fac`, buried inside a non-fanned block, is never a top-level candidate)."""
-    roster = _constituents_roster(out)
+def _dry_constituent_fanouts(record):
+    """Within the assembled record, factor any per-constituent fan-out into shared + per_constituent
+    (lossless). Driven by the constituents roster in `ohc_derive.run_facts`, so only genuine fan-outs
+    are touched — a value like `n_fac`, nested inside a non-fanned block, is never a candidate."""
+    facts = record.get("ohc_derive", {}).get("run_facts")
+    roster = (set(facts["constituents"]) if isinstance(facts, dict)
+              and isinstance(facts.get("constituents"), list) else None)
     if not roster:
-        return
-    rs = set(roster)
-    for key in list(out.attrs):
-        if not key.endswith(_PROV_SUFFIXES):
+        return record
+    for parts in record.values():
+        if not isinstance(parts, dict):
             continue
-        try:
-            block = json.loads(out.attrs[key])
-        except (TypeError, ValueError):
-            continue
-        if isinstance(block, dict) and len(block) > 1 and set(block) <= rs:
-            out.attrs[key] = _compact(_compact_block(block, "constituent"))
+        for name, val in list(parts.items()):
+            if isinstance(val, dict) and len(val) > 1 and set(val) <= roster:
+                parts[name] = _compact_block(val, "constituent")
+    return record
 
 
-def _stamp_provenance(out, blob, cfg, source_path):
-    """Roll the derive blob's provenance chain forward untouched (opaque strings — every
-    `*_run_config`/`_run_facts`/`_code_version`), then stamp this step's own block."""
+def stamp_config_record(out, blob, cfg, source_path):
+    """Assemble the whole provenance chain into ONE `config_record` attribute, keyed by stage and DRY'd
+    per constituent. A single attribute keeps the file at <=8 global attributes, i.e. HDF5 *compact*
+    attribute storage — which every reader handles. Emitting a dozen separate `*_run_config` etc. tips
+    HDF5 into dense (fractal-heap) storage, whose exact layout some netcdf builds mis-read."""
+    record = {}
+    # the forwarded chain: group the blob's *_run_config/_run_facts/_code_version by stage
     for k, v in blob.attrs.items():
-        if k.endswith(_PROV_SUFFIXES):
-            out.attrs[k] = v
-    out.attrs["%s_code_version" % STAGE] = cfg.code_version
-    out.attrs["%s_run_config" % STAGE] = _compact(vars(cfg))
-    out.attrs["%s_run_facts" % STAGE] = _compact({
-        "level": blob.attrs.get("level"),
-        "time_window": blob.attrs.get("time_window", "all"),
-        "area_m2": float(blob.attrs["area_m2"]),
-        "quantities_present": [q for q in ("ohca", "ohu", "ohca_trend", "ohu_trend") if q in blob],
-        "ensemble": any(q + "_sd" in blob for q in ("ohca", "ohu")),
-        "source_blob": os.path.abspath(source_path),
-    })
+        for suffix in _PROV_SUFFIXES:
+            if k.endswith(suffix):
+                record.setdefault(k[:-len(suffix)], {})[suffix[1:]] = _maybe_json(v)
+                break
+    # this step's own block
+    record[STAGE] = {
+        "run_config": vars(cfg),
+        "run_facts": {
+            "level": blob.attrs.get("level"),
+            "time_window": blob.attrs.get("time_window", "all"),
+            "area_m2": float(blob.attrs["area_m2"]),
+            "quantities_present": [q for q in ("ohca", "ohu", "ohca_trend", "ohu_trend") if q in blob],
+            "ensemble": any(q + "_sd" in blob for q in ("ohca", "ohu")),
+            "source_blob": os.path.abspath(source_path),
+        },
+        "code_version": cfg.code_version,
+    }
+    out.attrs["config_record"] = _compact(_dry_constituent_fanouts(record))
 
 
 def _trend_seconds(trend_var):
@@ -227,8 +232,7 @@ def main():
                              % path)
         dest = os.path.join(cfg.out, filename(blob.attrs["level"], cfg.tag, _window_token(blob)))
         out = build_dataset(blob, cfg.tag, cfg.provenance_link)
-        _stamp_provenance(out, blob, cfg, path)                    # roll the chain forward + stamp our own
-        compact_provenance(out)                                    # DRY per-constituent fan-outs (lossless)
+        stamp_config_record(out, blob, cfg, path)                  # whole chain -> one config_record attr
         enc = {v: {"_FillValue": -999.0} for v in out.data_vars}   # target fill (NaN -> -999)
         out.to_netcdf(dest, engine="netcdf4", encoding=enc)
         print("wrote", dest)
