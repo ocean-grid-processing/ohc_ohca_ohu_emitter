@@ -41,6 +41,69 @@ def _compact(obj):
     return json.dumps(obj, separators=(",", ":"), default=str)
 
 
+def _shared_and_per(group_map):
+    """{group: block} -> (shared, per): keys present in every group with an equal value go to `shared`;
+    everything else stays per group. Lossless — block[g] == {**shared, **per[g]}."""
+    groups = list(group_map)
+    common = set(group_map[groups[0]])
+    for g in groups[1:]:
+        common &= set(group_map[g])
+    shared = {}
+    for k in sorted(common):
+        vals = [group_map[g][k] for g in groups]
+        if all(v == vals[0] for v in vals):
+            shared[k] = vals[0]
+    per = {g: {k: v for k, v in group_map[g].items() if k not in shared} for g in groups}
+    return shared, per
+
+
+def _compact_block(block, axis):
+    """Factor one fan-out `{group: value}`: object values -> shared + per_<axis> (a fully-shared block
+    collapses to the bare shared object); scalar values -> the bare value if all agree, else per_<axis>."""
+    values = list(block.values())
+    if all(isinstance(v, dict) for v in values):
+        shared, per = _shared_and_per(block)
+        if not any(per.values()):
+            return shared
+        return {"shared": shared, "per_" + axis: per}
+    if all(v == values[0] for v in values):
+        return values[0]
+    return {"per_" + axis: dict(block)}
+
+
+def _constituents_roster(out):
+    """The constituents this file was built from, read off ohc_derive_run_facts (or None)."""
+    facts = out.attrs.get("ohc_derive_run_facts")
+    if not facts:
+        return None
+    try:
+        c = json.loads(facts)
+    except (TypeError, ValueError):
+        return None
+    c = c.get("constituents") if isinstance(c, dict) else None
+    return c if isinstance(c, list) else None
+
+
+def compact_provenance(out):
+    """DRY the forwarded provenance in place. Any top-level block that fans out over the constituents
+    roster (keys are a subset of it) is factored into shared + per_constituent — a lossless, reversible
+    pivot. Driven by the recorded roster, so only genuine per-constituent fan-outs are touched (a value
+    like `n_fac`, buried inside a non-fanned block, is never a top-level candidate)."""
+    roster = _constituents_roster(out)
+    if not roster:
+        return
+    rs = set(roster)
+    for key in list(out.attrs):
+        if not key.endswith(_PROV_SUFFIXES):
+            continue
+        try:
+            block = json.loads(out.attrs[key])
+        except (TypeError, ValueError):
+            continue
+        if isinstance(block, dict) and len(block) > 1 and set(block) <= rs:
+            out.attrs[key] = _compact(_compact_block(block, "constituent"))
+
+
 def _stamp_provenance(out, blob, cfg, source_path):
     """Roll the derive blob's provenance chain forward untouched (opaque strings — every
     `*_run_config`/`_run_facts`/`_code_version`), then stamp this step's own block."""
@@ -166,6 +229,7 @@ def main():
         dest = os.path.join(cfg.out, filename(blob.attrs["level"], cfg.tag, _window_token(blob)))
         out = build_dataset(blob, cfg.tag, cfg.provenance_link)
         _stamp_provenance(out, blob, cfg, path)                    # roll the chain forward + stamp our own
+        compact_provenance(out)                                    # DRY per-constituent fan-outs (lossless)
         enc = {v: {"_FillValue": -999.0} for v in out.data_vars}   # target fill (NaN -> -999)
         out.to_netcdf(dest, engine="netcdf4", encoding=enc)
         print("wrote", dest)
