@@ -82,22 +82,31 @@ One blob in, one deliverable out, per level. Run `ohc_derive` first with at leas
 ohca,ohu` (add `ohca_trend,ohu_trend` for the trend attrs; run without `--no-ensemble` for the `_std`
 companions).
 
-**Provenance chain.** Since each deliverable is built from one derive blob, this step is a 1-in-1-out
-courier: it rolls that blob's whole provenance chain forward — every `*_run_config` / `*_run_facts` /
-`*_code_version` (the grouped `localgp_ingest_*` / `localgp_publish_*` and the `ohc_derive_*` blocks) —
-and adds its own `ohc_ohca_ohu_emitter_run_config` (resolved args), `ohc_ohca_ohu_emitter_run_facts`
-(level, window, area, quantities, source blob), and `ohc_ohca_ohu_emitter_code_version`. The global
-`provenance_tag` / `provenance_link` are this step's own.
+**Provenance chain.** Each deliverable is built from one derive blob, so this step is a 1-in-1-out
+courier: it rolls that blob's whole provenance chain forward (every `*_run_config` / `*_run_facts` /
+`*_code_version` — the grouped `localgp_ingest_*` / `localgp_publish_*` and the `ohc_derive_*` blocks)
+and folds in its own block, emitting the lot as **one** `config_record` attribute keyed by stage:
 
-Being the terminal step, it then **compacts** the forwarded blocks (`compact_provenance`): the
-`localgp_*` blocks are per-constituent fan-outs (`{15_20:{…}, 15_300:{…}, …}`) whose entries are nearly
-identical, so each is factored into `{"shared": {common config}, "per_constituent": {only what
-differs}}` — and a fan-out whose entries fully agree (e.g. a shared `code_version`) collapses to a bare
-value. This is a lossless, reversible pivot (a constituent's block is `shared` merged with its
-`per_constituent` entry), driven by the `constituents` roster in `ohc_derive_run_facts` — so only
-genuine per-constituent fan-outs are touched and a value like `n_fac` (nested inside a non-fanned
-block) is never mistaken for one. The result is one readable `shared` block plus a few per-constituent
-lines instead of N photocopies.
+```
+config_record = {
+  "localgp_ingest":       {"run_config": {…}, "run_facts": {…}, "code_version": "…"},
+  "localgp_publish":      {…},
+  "ohc_derive":           {…},
+  "ohc_ohca_ohu_emitter": {"run_config": {resolved args}, "run_facts": {level, window, area, …}, "code_version": "…"}
+}
+```
+
+*Why one attribute:* a dozen separate global attributes tips HDF5 into **dense (fractal-heap) attribute
+storage**, whose exact layout some netcdf builds mis-read; a single attribute keeps the file at ≤ 8
+global attributes, i.e. **compact** storage, which every reader handles. The global `provenance_tag` /
+`provenance_link` stay separate (they're the run's discoverable identity).
+
+The per-constituent `localgp_*` blocks are **DRY'd**: each `{15_20:{…}, 15_300:{…}, …}` fan-out is
+factored into `{"shared": {common config}, "per_constituent": {only what differs}}`, and a fan-out
+whose entries fully agree (e.g. a shared `code_version`) collapses to a bare value. Lossless and
+reversible (a constituent's block is `shared` merged with its `per_constituent` entry), driven by the
+`constituents` roster in `ohc_derive.run_facts` — so only genuine fan-outs are touched and a value like
+`n_fac`, nested inside a non-fanned block, is never mistaken for one.
 
 #### emit.py options
 
