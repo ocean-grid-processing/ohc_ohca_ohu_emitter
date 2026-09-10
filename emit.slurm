@@ -4,7 +4,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --time=00:30:00
-#SBATCH --job-name=ohc_ohca_ohu
+#SBATCH --job-name=ohc_ohca_ohu_emitter
 #SBATCH --output=%x.%j.out
 #SBATCH --mail-type=FAIL
 #SBATCH --mail-user=katie.mills@colorado.edu
@@ -17,11 +17,13 @@ conda activate ohc_crosscheck
 
 cd $SLURM_SUBMIT_DIR
 tag=260908-OP20260507
-results=/scratch/alpine/wimi7695/ohc_prod/results_260824
-window=2004_2025          # whole-record derive (no --time-window); set to your record's span
+results=/scratch/alpine/wimi7695/ohc_prod/results_260908
+window=$1
+level=$2
 python emit.py \
-  ${results}/derive_${tag}-ohca-ohu_${window}_0_2000.nc \
+  ${results}/derive_${tag}_${window}_${level}.nc \
   --tag ${tag} \
-  --provenance-link https://github.com/argovis/ohc_map_emitter/releases/tag/260824-OP20260507 \
-  --code-version https://github.com/argovis/ohc_ohca_ohu_emitter/commit/REPLACE_WITH_DEPLOYED_SHA \
+  --provenance-link https://github.com/ocean-grid-processing/provenance/blob/main/README.md \
+  --code-version https://github.com/ocean-grid-processing/ohc_ohca_ohu_emitter/releases/tag/1.0.0 \
   --out ${results}
+
