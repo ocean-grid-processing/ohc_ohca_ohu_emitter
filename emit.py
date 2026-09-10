@@ -162,11 +162,10 @@ def build_dataset(blob, tag, provenance_link):
                                    "long_name": "annual mean ocean heat uptake"}),
     }
     if "ohca_sd" in blob:
-        note = "worst-case ensemble 1-sigma: n_fac-weighted sum of the per-constituent SDs"
         dv["ohca_std"] = xr.DataArray(to_jm2(blob["ohca_sd"].values, area), dims=("time_ohca",),
-                                      attrs={"units": "J/m2", "comment": note})
+                                      attrs={"units": "J/m2"})
         dv["ohu_std"] = xr.DataArray(to_wm2(blob["ohu_sd"].values, area), dims=("time_ohca",),
-                                     attrs={"units": "W/m2", "comment": note})
+                                     attrs={"units": "W/m2"})
 
     # Linear trends as attrs, per second: the trend's `per` attr picks the seconds in one step.
     if "ohca_trend" in blob:
