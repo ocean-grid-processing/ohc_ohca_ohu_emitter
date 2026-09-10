@@ -126,10 +126,25 @@ def build_dataset(blob, tag, provenance_link):
     return out
 
 
-def filename(level, tag):
-    """Target-style per-level name: ohca_ohu_<lo>_<hi>_dbar_<tag>.nc (low/high from the level)."""
+def _window_token(blob):
+    """Year-range token for the filename: the blob's baseline window, or its full record span when
+    windowless — matching the derive filename, so different baselines don't collide here either."""
+    win = blob.attrs.get("time_window", "all")
+    if win and win != "all":
+        return win.replace("-", "_")
+    if "year" in blob.coords:
+        yrs = blob["year"].values.astype(int)
+        return "%d_%d" % (int(yrs.min()), int(yrs.max()))
+    if "time" in blob.coords:
+        yrs = blob["time"].values.astype("datetime64[Y]").astype(int) + 1970
+        return "%d_%d" % (int(yrs.min()), int(yrs.max()))
+    return "all"
+
+
+def filename(level, tag, window):
+    """Target-style per-level name: ohca_ohu_<lo>_<hi>_dbar_<window>_<tag>.nc (low/high from the level)."""
     low, high = level.split("_")
-    return "ohca_ohu_%s_%s_dbar_%s.nc" % (low, high, tag)
+    return "ohca_ohu_%s_%s_dbar_%s_%s.nc" % (low, high, window, tag)
 
 
 def main():
@@ -148,7 +163,7 @@ def main():
         if "ohca" not in blob or "ohu" not in blob:
             raise SystemExit("%s carries no ohca/ohu; run ohc_derive with --quantities ohca,ohu (+ trends)"
                              % path)
-        dest = os.path.join(cfg.out, filename(blob.attrs["level"], cfg.tag))
+        dest = os.path.join(cfg.out, filename(blob.attrs["level"], cfg.tag, _window_token(blob)))
         out = build_dataset(blob, cfg.tag, cfg.provenance_link)
         _stamp_provenance(out, blob, cfg, path)                    # roll the chain forward + stamp our own
         enc = {v: {"_FillValue": -999.0} for v in out.data_vars}   # target fill (NaN -> -999)
