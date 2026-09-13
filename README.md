@@ -2,7 +2,7 @@
 
 `ohc_ohca_ohu_emitter` packages one `ohc_derive` blob into the annual **OHCA** (ocean heat content
 anomaly) and **OHU** (ocean heat uptake) deliverable — one NetCDF per level,
-`ohca_ohu_<lo>_<hi>_dbar_<data>_tw<baseline>_<tag>.nc`.
+`ohca_ohu_<tag>_<lo>_<hi>_dbar_<data>_tw<baseline>.nc`.
 
 ```
 ohc_ingest ─▶ publish ─▶ ohc_derive (--quantities ohca,ohu,ohca_trend,ohu_trend) ─▶ ohc_ohca_ohu_emitter ─▶ per-level .nc
@@ -113,7 +113,7 @@ reversible (a constituent's block is `shared` merged with its `per_constituent` 
 | option | default | effect |
 |---|---|---|
 | `derive_*.nc` (positional, 1+) | *(required)* | `ohc_derive` blobs, one per synthetic level (`derive_<tag>_<data>_tw<baseline>_<level>.nc`). Each must carry `ohca` and `ohu`. Point at the whole-record window (no `--time-window`), not gcos's 2005-2024. |
-| `--tag` | *(required)* | run token in the filename (`ohca_ohu_<lo>_<hi>_dbar_<data>_tw<baseline>_<tag>.nc`) and the `provenance_tag` attr. Used verbatim; should match the tag the blob was derived under. |
+| `--tag` | *(required)* | run token in the filename (`ohca_ohu_<tag>_<lo>_<hi>_dbar_<data>_tw<baseline>.nc`) and the `provenance_tag` attr. Used verbatim; should match the tag the blob was derived under. |
 | `--provenance-link` | *(none)* | URL/path to the provenance record; written to the `provenance_link` attr. |
 | `--code-version` | *(required)* | URL to the exact ohc_ohca_ohu_emitter code (commit/release); written to the `ohc_ohca_ohu_emitter_code_version` attr. |
 | `--out` | `.` | output directory (created if absent). |

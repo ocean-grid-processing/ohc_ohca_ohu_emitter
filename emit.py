@@ -215,9 +215,9 @@ def _file_token(blob):
 
 
 def filename(level, tag, token):
-    """Target-style per-level name: ohca_ohu_<lo>_<hi>_dbar_<data>_tw<baseline>_<tag>.nc."""
+    """Per-level name: ohca_ohu_<tag>_<lo>_<hi>_dbar_<data>_tw<baseline>.nc (tag leads, after the step)."""
     low, high = level.split("_")
-    return "ohca_ohu_%s_%s_dbar_%s_%s.nc" % (low, high, token, tag)
+    return "ohca_ohu_%s_%s_%s_dbar_%s.nc" % (tag, low, high, token)
 
 
 def main():
