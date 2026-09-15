@@ -152,7 +152,7 @@ def _time_ohca(years):
                                "calendar": "proleptic_gregorian", "long_name": "time"})
 
 
-def build_dataset(blob, tag, provenance_link, citation=""):
+def build_dataset(blob, tag, provenance_link, citation="", project=""):
     """A derive blob -> the OHCA/OHU deliverable Dataset over `time_ohca`."""
     area = float(blob.attrs["area_m2"])
     window = blob.attrs.get("time_window", "all")
@@ -192,6 +192,8 @@ def build_dataset(blob, tag, provenance_link, citation=""):
     if provenance_link is not None:
         out.attrs["provenance_link"] = provenance_link
     out.attrs["citation"] = citation
+    if project:
+        out.attrs["project"] = project        # top-level discoverable (also in config_record)
     return out
 
 
@@ -251,7 +253,7 @@ def main():
                              % path)
         dest = os.path.join(cfg.out, filename(blob.attrs["level"], cfg.tag, _file_token(blob),
                                               cfg.project, cfg.author))
-        out = build_dataset(blob, cfg.tag, cfg.provenance_link, cfg.citation)
+        out = build_dataset(blob, cfg.tag, cfg.provenance_link, cfg.citation, cfg.project)
         stamp_config_record(out, blob, cfg, path)                  # whole chain -> one config_record attr
         enc = {v: {"_FillValue": -999.0} for v in out.data_vars}   # target fill (NaN -> -999)
         out.to_netcdf(dest, engine="netcdf4", encoding=enc)
