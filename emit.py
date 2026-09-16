@@ -112,7 +112,7 @@ def stamp_config_record(out, blob, cfg, source_path):
                 record.setdefault(k[:-len(suffix)], {})[suffix[1:]] = _maybe_json(v)
                 break
     # this step's own block. citation has its own top-level attr, so keep it out of the brick (not
-    # duplicated); project/author stay in run_config for the record.
+    # duplicated); product_name/author stay in run_config for the record.
     record[STAGE] = {
         "run_config": {k: v for k, v in vars(cfg).items() if k != "citation"},
         "run_facts": {
@@ -152,7 +152,7 @@ def _time_ohca(years):
                                "calendar": "proleptic_gregorian", "long_name": "time"})
 
 
-def build_dataset(blob, tag, provenance_link, citation="", project=""):
+def build_dataset(blob, tag, provenance_link, citation="", product_name=""):
     """A derive blob -> the OHCA/OHU deliverable Dataset over `time_ohca`."""
     area = float(blob.attrs["area_m2"])
     window = blob.attrs.get("time_window", "all")
@@ -192,8 +192,8 @@ def build_dataset(blob, tag, provenance_link, citation="", project=""):
     if provenance_link is not None:
         out.attrs["provenance_link"] = provenance_link
     out.attrs["citation"] = citation
-    if project:
-        out.attrs["project"] = project        # top-level discoverable (also in config_record)
+    if product_name:
+        out.attrs["product_name"] = product_name   # top-level discoverable key (also in config_record)
     return out
 
 
@@ -218,11 +218,11 @@ def _file_token(blob):
     return "%s_tw%s" % (data, baseline)
 
 
-def filename(level, tag, token, project, author):
-    """Per-level name: ohca_ohu_<tag>_<lo>_<hi>_dbar_<data>_tw<baseline>_<project>_<author>.nc
-    (tag leads after the step; project/author are the last thing before .nc)."""
+def filename(level, tag, token, product_name, author):
+    """Per-level name: ohca_ohu_<tag>_<lo>_<hi>_dbar_<data>_tw<baseline>_<product_name>_<author>.nc
+    (tag leads after the step; product_name/author are the last thing before .nc)."""
     low, high = level.split("_")
-    return "ohca_ohu_%s_%s_%s_dbar_%s_%s_%s.nc" % (tag, low, high, token, project, author)
+    return "ohca_ohu_%s_%s_%s_dbar_%s_%s_%s.nc" % (tag, low, high, token, product_name, author)
 
 
 def main():
@@ -233,8 +233,8 @@ def main():
     ap.add_argument("--code-version", required=True,
                     help="URL to the exact ohc_ohca_ohu_emitter code (commit/release); stamped as "
                          "ohc_ohca_ohu_emitter_code_version")
-    ap.add_argument("--project", required=True,
-                    help="project string, the first of the filename's trailing pair and in config_record "
+    ap.add_argument("--product-name", required=True,
+                    help="product_name string, the first of the filename's trailing pair and in config_record "
                          "(e.g. LocalGP)")
     ap.add_argument("--author", required=True,
                     help="author string, the last of the filename's trailing pair and in config_record "
@@ -243,7 +243,7 @@ def main():
                     help="citation sentence; written to the top-level `citation` attr")
     ap.add_argument("--out", default=".")
     cfg = ap.parse_args()
-    cfg.project = "".join(cfg.project.split())                  # filename tokens: whitespace-stripped,
+    cfg.product_name = "".join(cfg.product_name.split())                  # filename tokens: whitespace-stripped,
     cfg.author = "".join(cfg.author.split())                    # case preserved, no other munging
     os.makedirs(cfg.out, exist_ok=True)
     for path in cfg.blobs:
@@ -252,8 +252,8 @@ def main():
             raise SystemExit("%s carries no ohca/ohu; run ohc_derive with --quantities ohca,ohu (+ trends)"
                              % path)
         dest = os.path.join(cfg.out, filename(blob.attrs["level"], cfg.tag, _file_token(blob),
-                                              cfg.project, cfg.author))
-        out = build_dataset(blob, cfg.tag, cfg.provenance_link, cfg.citation, cfg.project)
+                                              cfg.product_name, cfg.author))
+        out = build_dataset(blob, cfg.tag, cfg.provenance_link, cfg.citation, cfg.product_name)
         stamp_config_record(out, blob, cfg, path)                  # whole chain -> one config_record attr
         enc = {v: {"_FillValue": -999.0} for v in out.data_vars}   # target fill (NaN -> -999)
         out.to_netcdf(dest, engine="netcdf4", encoding=enc)
