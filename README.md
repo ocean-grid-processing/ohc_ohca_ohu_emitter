@@ -2,7 +2,7 @@
 
 `ohc_ohca_ohu_emitter` packages one `ohc_derive` blob into the annual **OHCA** (ocean heat content
 anomaly) and **OHU** (ocean heat uptake) deliverable — one NetCDF per level,
-`ohca_ohu_<lo>_<hi>_dbar_<tag>.nc`.
+`ohca_ohu_<tag>_<lo>_<hi>_dbar_<data>_tw<baseline>.nc`.
 
 ```
 ohc_ingest ─▶ publish ─▶ ohc_derive (--quantities ohca,ohu,ohca_trend,ohu_trend) ─▶ ohc_ohca_ohu_emitter ─▶ per-level .nc
@@ -74,20 +74,55 @@ docker container run -v $(pwd):/app ohc_ohca_ohu_emitter:test pytest
 
 ### Run
 ```bash
-python emit.py derive_<tag>_<level>.nc [more levels …] --tag <tag> [--provenance-link URL] [--out DIR]
+python emit.py derive_<tag>_<data>_tw<baseline>_<level>.nc [more levels …] --tag <tag> --code-version URL \
+    --project LocalGP --author Giglio_etal2026 --citation "…" [--provenance-link URL] [--out DIR]
 ```
+
+`--project` / `--author` become the filename's trailing pair (`…_<project>_<author>.nc`) and are recorded
+in `config_record`; `--citation` is written to a standalone top-level `citation` attribute (a full
+sentence for the deposit).
 
 One blob in, one deliverable out, per level. Run `ohc_derive` first with at least `--quantities
 ohca,ohu` (add `ohca_trend,ohu_trend` for the trend attrs; run without `--no-ensemble` for the `_std`
 companions).
 
+**Provenance chain.** Each deliverable is built from one derive blob, so this step is a 1-in-1-out
+courier: it rolls that blob's whole provenance chain forward (every `*_run_config` / `*_run_facts` /
+`*_code_version` — the grouped `localgp_ingest_*` / `localgp_publish_*` and the `ohc_derive_*` blocks)
+and folds in its own block, emitting the lot as **one** `config_record` attribute keyed by stage:
+
+```
+config_record = {
+  "localgp_ingest":       {"run_config": {…}, "run_facts": {…}, "code_version": "…"},
+  "localgp_publish":      {…},
+  "ohc_derive":           {…},
+  "ohc_ohca_ohu_emitter": {"run_config": {resolved args}, "run_facts": {level, window, area, …}, "code_version": "…"}
+}
+```
+
+*Why one attribute:* a dozen separate global attributes tips HDF5 into **dense (fractal-heap) attribute
+storage**, whose exact layout some netcdf builds mis-read; a single attribute keeps the file at ≤ 8
+global attributes, i.e. **compact** storage, which every reader handles. The global `provenance_tag` /
+`provenance_link` stay separate (they're the run's discoverable identity).
+
+The per-constituent `localgp_*` blocks are **DRY'd**: each `{15_20:{…}, 15_300:{…}, …}` fan-out is
+factored into `{"shared": {common config}, "per_constituent": {only what differs}}`, and a fan-out
+whose entries fully agree (e.g. a shared `code_version`) collapses to a bare value. Lossless and
+reversible (a constituent's block is `shared` merged with its `per_constituent` entry), driven by the
+`constituents` roster in `ohc_derive.run_facts` — so only genuine fan-outs are touched and a value like
+`n_fac`, nested inside a non-fanned block, is never mistaken for one.
+
 #### emit.py options
 
 | option | default | effect |
 |---|---|---|
-| `derive_*.nc` (positional, 1+) | *(required)* | `ohc_derive` blobs, one per synthetic level (`derive_<tag>_<level>.nc`). Each must carry `ohca` and `ohu`. |
-| `--tag` | *(required)* | run token in the filename (`ohca_ohu_<lo>_<hi>_dbar_<tag>.nc`) and the `provenance_tag` attr. Used verbatim; should match the tag the blob was derived under. |
+| `derive_*.nc` (positional, 1+) | *(required)* | `ohc_derive` blobs, one per synthetic level (`derive_<tag>_<data>_tw<baseline>_<level>.nc`). Each must carry `ohca` and `ohu`. Point at the whole-record window (no `--time-window`), not gcos's 2005-2024. |
+| `--tag` | *(required)* | run token in the filename (`ohca_ohu_<tag>_<lo>_<hi>_dbar_<data>_tw<baseline>_<project>_<author>.nc`) and the `provenance_tag` attr. Used verbatim; should match the tag the blob was derived under. |
 | `--provenance-link` | *(none)* | URL/path to the provenance record; written to the `provenance_link` attr. |
+| `--code-version` | *(required)* | URL to the exact ohc_ohca_ohu_emitter code (commit/release); written to the `ohc_ohca_ohu_emitter_code_version` attr. |
+| `--project` | *(required)* | project string; first of the filename's trailing pair (whitespace-stripped, case preserved), a standalone top-level `project` attr, and recorded in `config_record`. |
+| `--author` | *(required)* | author string; last of the filename's trailing pair (e.g. `Giglio_etal2026`) and recorded in `config_record`. |
+| `--citation` | *(required)* | citation sentence; written to the standalone top-level `citation` attr (kept out of `config_record` so it isn't duplicated). |
 | `--out` | `.` | output directory (created if absent). |
 
 ## Notes
